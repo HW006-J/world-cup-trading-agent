@@ -175,4 +175,12 @@ export const demoProvider: MatchDataProvider = {
   getSelections(match, marketId) {
     return selectionsFor(match, marketId);
   },
+  getSupportedMarkets() {
+    // Demo fixtures always carry the same three markets. A live provider
+    // implements this per-fixture instead of returning a fixed constant.
+    return MARKETS;
+  },
+  getMeta() {
+    return { source: "demo", asOf: new Date().toISOString() };
+  },
 };

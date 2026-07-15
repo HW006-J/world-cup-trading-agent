@@ -1,4 +1,4 @@
-import { CONFIDENCE_THRESHOLD, EDGE_THRESHOLD_PP } from "./engine";
+import { CONFIDENCE_THRESHOLD, EDGE_THRESHOLD_PP } from "./engine.ts";
 import type { Opportunity } from "./scanner";
 import type { AnalysisResult } from "./types";
 

@@ -59,6 +59,14 @@ export interface MarketDefinition {
 /** Decimal odds keyed by selection id. */
 export type OddsBySelection = Record<string, number>;
 
+export type DataSourceMode = "demo" | "txline";
+
+export interface ProviderMeta {
+  source: DataSourceMode;
+  /** ISO timestamp for when this snapshot was produced (demo) or fetched (live). */
+  asOf: string;
+}
+
 export type FactorDirection = "increase" | "decrease" | "neutral";
 
 export interface FactorExplanation {
@@ -115,4 +123,12 @@ export interface MatchDataProvider {
   getMatches(): Match[];
   getOdds(matchId: string, marketId: MarketId): OddsBySelection;
   getSelections(match: Match, marketId: MarketId): MarketSelection[];
+  /**
+   * Markets currently supported for this match. Demo mode always returns the
+   * same fixed list; a live provider may return fewer (or zero) depending on
+   * what the fixture's odds feed actually carries.
+   */
+  getSupportedMarkets(match: Match): MarketDefinition[];
+  /** Which data source is active, and when its data was produced/fetched. */
+  getMeta(): ProviderMeta;
 }
