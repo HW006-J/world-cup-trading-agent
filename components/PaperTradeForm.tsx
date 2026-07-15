@@ -5,13 +5,20 @@ import { formatCurrency, formatOdds } from "@/lib/format";
 import type { Signal } from "@/lib/types";
 import { Panel, Pill } from "./ui";
 
+export type TradeDisabledReason = "finished" | "noTrade" | null;
+
+const DISABLED_MESSAGES: Record<Exclude<TradeDisabledReason, null>, string> = {
+  finished: "Trading is closed — this match has finished.",
+  noTrade: "Manual trading is disabled because PitchEdge's risk thresholds were not met.",
+};
+
 export function PaperTradeForm({
   matchLabel,
   marketLabel,
   selectionLabel,
   odds,
   signal,
-  disabled,
+  disabledReason,
   onSubmit,
 }: {
   matchLabel: string;
@@ -19,7 +26,7 @@ export function PaperTradeForm({
   selectionLabel: string;
   odds: number;
   signal: Signal;
-  disabled: boolean;
+  disabledReason: TradeDisabledReason;
   onSubmit: (stake: number) => void;
 }) {
   const [stakeInput, setStakeInput] = useState("10");
@@ -75,9 +82,9 @@ export function PaperTradeForm({
         </div>
       </div>
 
-      {disabled ? (
+      {disabledReason ? (
         <p className="rounded-md border border-border bg-surface-elevated px-3 py-2 text-xs text-muted">
-          Trading is closed &mdash; this match has finished.
+          {DISABLED_MESSAGES[disabledReason]}
         </p>
       ) : (
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">

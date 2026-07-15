@@ -77,7 +77,9 @@ export function AdvancedAnalysis({
             selectionLabel={selection.label}
             odds={analysis.odds}
             signal={analysis.signal}
-            disabled={match.status === "finished"}
+            disabledReason={
+              match.status === "finished" ? "finished" : !scan.best ? "noTrade" : null
+            }
             onSubmit={(stake) =>
               onRecordTrade(
                 buildPaperTrade({

@@ -91,7 +91,7 @@ export function RecommendationModal({
       <Modal onClose={onClose} labelledBy={HEADING_ID}>
         <div className="flex flex-col items-center gap-3 py-2 text-center">
           <h2 id={HEADING_ID} className="text-lg font-semibold text-buy">
-            ✓ Paper trade recorded
+            ✓ Paper trade recorded. PitchEdge is now monitoring the position.
           </h2>
           <p className="text-sm text-foreground">
             {formatCurrency(approvedTrade.stake)} on {approvedTrade.selectionLabel} (

@@ -21,7 +21,9 @@ export function MatchSelector({
 }) {
   return (
     <div>
-      <h2 className="mb-3 text-center text-lg font-semibold text-foreground">Select a match</h2>
+      <h2 className="mb-3 text-center text-lg font-semibold text-foreground">
+        Choose a match for PitchEdge to analyse
+      </h2>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         {matches.map((match) => (
           <button
