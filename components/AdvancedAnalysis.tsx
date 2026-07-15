@@ -3,7 +3,7 @@
 import { useState } from "react";
 import type { Match, MarketId, PaperTrade } from "@/lib/types";
 import type { ScanResult } from "@/lib/scanner";
-import { demoProvider, MARKETS } from "@/lib/demoData";
+import { demoProvider } from "@/lib/demoData";
 import { computeAnalysis } from "@/lib/engine";
 import { buildPaperTrade } from "@/lib/trade";
 import { MarketSelector } from "./MarketSelector";
@@ -32,7 +32,8 @@ export function AdvancedAnalysis({
   const [marketId, setMarketId] = useState<MarketId>(scan.best?.marketId ?? "matchWinner");
   const [selectionId, setSelectionId] = useState(scan.best?.selectionId ?? "home");
 
-  const market = MARKETS.find((m) => m.id === marketId) ?? MARKETS[0];
+  const supportedMarkets = demoProvider.getSupportedMarkets(match);
+  const market = supportedMarkets.find((m) => m.id === marketId) ?? supportedMarkets[0];
   const selections = demoProvider.getSelections(match, marketId);
   const selection = selections.find((s) => s.id === selectionId) ?? selections[0];
   const odds = demoProvider.getOdds(match.id, marketId)[selection?.id ?? ""];
@@ -52,7 +53,7 @@ export function AdvancedAnalysis({
           Manual market selection
         </p>
         <MarketSelector
-          markets={MARKETS}
+          markets={supportedMarkets}
           selections={selections}
           selectedMarketId={marketId}
           selectedSelectionId={selectionId}
@@ -61,7 +62,7 @@ export function AdvancedAnalysis({
         />
       </div>
 
-      {analysis && selection ? (
+      {market && analysis && selection ? (
         <>
           <VerdictPanel
             analysis={analysis}

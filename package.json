@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "node --test lib/scanner.test.ts lib/dataSource.test.ts lib/txline/normalize.test.ts"
   },
   "dependencies": {
     "next": "16.2.10",

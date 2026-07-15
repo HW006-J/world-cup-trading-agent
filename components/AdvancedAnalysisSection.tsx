@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { demoProvider, MARKETS } from "@/lib/demoData";
+import { demoProvider } from "@/lib/demoData";
 import { scanMatch } from "@/lib/scanner";
 import type { PaperTrade } from "@/lib/types";
 import { AdvancedAnalysis } from "./AdvancedAnalysis";
@@ -21,7 +21,10 @@ export function AdvancedAnalysisSection({
 }) {
   const [matchId, setMatchId] = useState(matches[0].id);
   const match = matches.find((m) => m.id === matchId) ?? matches[0];
-  const scan = useMemo(() => scanMatch(match, demoProvider, MARKETS), [match]);
+  const scan = useMemo(
+    () => scanMatch(match, demoProvider, demoProvider.getSupportedMarkets(match)),
+    [match],
+  );
 
   return (
     <details className="rounded-xl border border-border/60 bg-surface/60">

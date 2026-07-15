@@ -2,13 +2,13 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Header } from "@/components/Header";
-import { SimulatedBanner } from "@/components/SimulatedBanner";
+import { SourceBanner } from "@/components/SourceBanner";
 import { MatchSelector } from "@/components/MatchSelector";
 import { RecommendationModal } from "@/components/RecommendationModal";
 import { TradeHistoryModal } from "@/components/TradeHistoryModal";
 import { AdvancedAnalysisSection } from "@/components/AdvancedAnalysisSection";
 import { Disclaimer } from "@/components/Disclaimer";
-import { demoProvider, MARKETS } from "@/lib/demoData";
+import { demoProvider } from "@/lib/demoData";
 import { scanMatch } from "@/lib/scanner";
 import { SEED_TRADES } from "@/lib/seedTrades";
 import type { PaperTrade } from "@/lib/types";
@@ -31,7 +31,7 @@ export default function Home() {
 
   const match = matches.find((m) => m.id === selectedMatchId) ?? null;
   const scan = useMemo(
-    () => (match ? scanMatch(match, demoProvider, MARKETS) : null),
+    () => (match ? scanMatch(match, demoProvider, demoProvider.getSupportedMarkets(match)) : null),
     [match],
   );
 
@@ -49,7 +49,7 @@ export default function Home() {
       <Header />
 
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
-        <SimulatedBanner />
+        <SourceBanner meta={demoProvider.getMeta()} />
 
         <MatchSelector matches={matches} onSelect={setSelectedMatchId} />
 

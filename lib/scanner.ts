@@ -1,4 +1,4 @@
-import { computeAnalysis } from "./engine";
+import { computeAnalysis } from "./engine.ts";
 import type { AnalysisResult, MarketDefinition, Match, MatchDataProvider } from "./types";
 
 // ---------------------------------------------------------------------------
