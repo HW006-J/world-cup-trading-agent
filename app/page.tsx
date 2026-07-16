@@ -11,16 +11,28 @@ import { Disclaimer } from "@/components/Disclaimer";
 import { demoProvider } from "@/lib/demoData";
 import { scanMatch } from "@/lib/scanner";
 import { SEED_TRADES } from "@/lib/seedTrades";
+import { loadStoredTrades, saveStoredTrades } from "@/lib/tradeStorage";
 import type { PaperTrade } from "@/lib/types";
 
 const matches = demoProvider.getMatches();
+const SEED_IDS = new Set(SEED_TRADES.map((t) => t.id));
 
 const TOAST_DURATION_MS = 2500;
+
+// trades is never part of the initial DOM (the history modal starts closed),
+// so reading localStorage in the useState initializer can't cause a
+// hydration mismatch — it only ever runs on the client anyway.
+function getInitialTrades(): PaperTrade[] {
+  const stored = loadStoredTrades();
+  if (stored.length === 0) return SEED_TRADES;
+  const restored = stored.filter((t) => !SEED_IDS.has(t.id));
+  return [...SEED_TRADES, ...restored];
+}
 
 export default function Home() {
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [showTradeHistory, setShowTradeHistory] = useState(false);
-  const [trades, setTrades] = useState<PaperTrade[]>(SEED_TRADES);
+  const [trades, setTrades] = useState<PaperTrade[]>(getInitialTrades);
   const [toast, setToast] = useState<string | null>(null);
 
   useEffect(() => {
@@ -36,7 +48,12 @@ export default function Home() {
   );
 
   function handleRecordTrade(trade: PaperTrade) {
-    setTrades((prev) => [trade, ...prev]);
+    setTrades((prev) => {
+      if (prev.some((t) => t.id === trade.id)) return prev;
+      const next = [trade, ...prev];
+      saveStoredTrades(next.filter((t) => !SEED_IDS.has(t.id)));
+      return next;
+    });
   }
 
   function handleReject() {

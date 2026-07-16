@@ -100,7 +100,7 @@ export function PaperTradeForm({
               htmlFor="stake"
               className="mb-1 block text-xs font-medium text-muted"
             >
-              Stake ($)
+              Stake (&pound;)
             </label>
             <input
               id="stake"
