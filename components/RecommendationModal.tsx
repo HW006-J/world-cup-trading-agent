@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Match, PaperTrade } from "@/lib/types";
 import type { ScanResult } from "@/lib/scanner";
 import { buildPaperTrade } from "@/lib/trade";
@@ -36,6 +36,9 @@ export function RecommendationModal({
   const [stakeInput, setStakeInput] = useState(DEFAULT_STAKE);
   const [error, setError] = useState<string | null>(null);
   const [approvedTrade, setApprovedTrade] = useState<PaperTrade | null>(null);
+  // Guards against a duplicate trade if approve fires twice (double click /
+  // double submit) before the approved-state re-render swaps the form out.
+  const hasApprovedRef = useRef(false);
 
   useEffect(() => {
     const timer = setTimeout(() => setIsScanning(false), SCAN_DELAY_MS);
@@ -47,12 +50,14 @@ export function RecommendationModal({
   function handleApprove(event: FormEvent) {
     event.preventDefault();
     if (!scan.best) return;
+    if (hasApprovedRef.current) return;
     const stakeValue = Number(stakeInput);
     if (!stakeInput.trim() || !Number.isFinite(stakeValue) || stakeValue <= 0) {
       setError("Stake must be a positive number.");
       return;
     }
     setError(null);
+    hasApprovedRef.current = true;
     const trade = buildPaperTrade({
       match,
       marketLabel: scan.best.marketLabel,
@@ -91,12 +96,13 @@ export function RecommendationModal({
       <Modal onClose={onClose} labelledBy={HEADING_ID}>
         <div className="flex flex-col items-center gap-3 py-2 text-center">
           <h2 id={HEADING_ID} className="text-lg font-semibold text-buy">
-            ✓ Paper trade recorded. PitchEdge is now monitoring the position.
+            ✓ Trade approved. PitchEdge is now monitoring the position.
           </h2>
           <p className="text-sm text-foreground">
-            {formatCurrency(approvedTrade.stake)} on {approvedTrade.selectionLabel} (
-            {approvedTrade.marketLabel}) at {formatOdds(approvedTrade.odds)}
+            Paper trade recorded: {formatCurrency(approvedTrade.stake)} on{" "}
+            {approvedTrade.selectionLabel} at decimal odds {formatOdds(approvedTrade.odds)}.
           </p>
+          <p className="text-xs text-muted">{approvedTrade.marketLabel}</p>
           <p className="text-xs text-muted">
             Simulated paper trade &mdash; no real funds involved.
           </p>

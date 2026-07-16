@@ -7,13 +7,17 @@ export function formatPp(points: number, digits = 1): string {
   return `${sign}${points.toFixed(digits)}pp`;
 }
 
+// PitchEdge paper trades are GBP-only — this is the single source of truth
+// for the currency symbol so displays can't drift out of sync (see £/$ bug).
+const CURRENCY_SYMBOL = "£";
+
 export function formatMoney(value: number, digits = 2): string {
   const sign = value > 0 ? "+" : value < 0 ? "-" : "";
-  return `${sign}$${Math.abs(value).toFixed(digits)}`;
+  return `${sign}${CURRENCY_SYMBOL}${Math.abs(value).toFixed(digits)}`;
 }
 
 export function formatCurrency(value: number, digits = 2): string {
-  return `$${value.toFixed(digits)}`;
+  return `${CURRENCY_SYMBOL}${value.toFixed(digits)}`;
 }
 
 export function formatOdds(odds: number): string {
