@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { RecommendationModal } from "@/components/RecommendationModal";
 import { demoProvider } from "@/lib/demoData";
 import { scanAllMatches } from "@/lib/scanner";
@@ -13,6 +13,14 @@ import type { PaperTrade } from "@/lib/types";
 // to open one) and "upcoming" (not yet live) are excluded before ranking,
 // rather than relying on downstream guards to hide a nonsensical result.
 const LIVE_MATCHES = demoProvider.getMatches().filter((m) => m.status === "live");
+
+// Minimum time the "Scanning…" state stays visible before the result is
+// revealed, so the audience has a moment to register that PitchEdge is
+// comparing multiple matches. The scanAllMatches calculation itself still
+// runs immediately (via useMemo, below) — only the reveal is delayed.
+const SCAN_REVEAL_DELAY_MS = 1200;
+
+type ScanPhase = "idle" | "scanning" | "revealed";
 
 export function BestEdgeScanner({
   active,
@@ -29,6 +37,15 @@ export function BestEdgeScanner({
   onClose: () => void;
   onViewTrades: () => void;
 }) {
+  const [phase, setPhase] = useState<ScanPhase>("idle");
+  const revealTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (revealTimerRef.current) clearTimeout(revealTimerRef.current);
+    };
+  }, []);
+
   const crossScan = useMemo(
     () => (active ? scanAllMatches(LIVE_MATCHES, demoProvider) : null),
     [active],
@@ -49,6 +66,25 @@ export function BestEdgeScanner({
         }
       : null;
 
+  function handleStart() {
+    if (phase === "scanning") return;
+    setPhase("scanning");
+    onStart();
+    revealTimerRef.current = setTimeout(() => setPhase("revealed"), SCAN_REVEAL_DELAY_MS);
+  }
+
+  function finish(callback: () => void) {
+    if (revealTimerRef.current) {
+      clearTimeout(revealTimerRef.current);
+      revealTimerRef.current = null;
+    }
+    setPhase("idle");
+    callback();
+  }
+
+  const isScanning = active && phase === "scanning";
+  const isRevealed = active && phase === "revealed";
+
   return (
     <>
       <div className="rounded-xl border-2 border-accent/40 bg-accent/5 p-5 sm:p-6">
@@ -62,30 +98,43 @@ export function BestEdgeScanner({
         </p>
         <button
           type="button"
-          onClick={onStart}
-          className="mt-4 rounded-md bg-accent px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90"
+          onClick={handleStart}
+          disabled={isScanning}
+          className="mt-4 rounded-md bg-accent px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-accent"
         >
-          Scan for best edge
+          {isScanning ? "Scanning…" : "Scan for best edge"}
         </button>
       </div>
 
-      {active && crossScan && !winningMatch ? (
+      {isScanning ? (
+        <div className="flex items-center justify-center gap-3 rounded-lg border border-accent/40 bg-accent/10 px-4 py-3 text-center">
+          <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent motion-reduce:animate-none" aria-hidden />
+          <p className="text-sm font-medium text-accent">
+            {crossScan
+              ? `Scanning ${crossScan.matchesScanned} live matches, ${crossScan.marketsScanned} markets and ${crossScan.outcomesScanned} outcomes…`
+              : "Scanning live matches…"}
+          </p>
+        </div>
+      ) : null}
+
+      {isRevealed && crossScan && !winningMatch ? (
         <p className="text-center text-sm text-muted">
           No live matches are available to scan right now.
         </p>
       ) : null}
 
-      {scanResultForModal ? (
+      {isRevealed && scanResultForModal ? (
         <RecommendationModal
           key={winningMatch!.id}
           match={winningMatch!}
           scan={scanResultForModal}
-          scanningLabel={`Scanning ${crossScan!.matchesScanned} matches, ${crossScan!.marketsScanned} markets and ${crossScan!.outcomesScanned} outcomes…`}
-          noTradeLabel={`PitchEdge scanned ${crossScan!.matchesScanned} matches (${crossScan!.outcomesScanned} outcomes), but none met both the edge and confidence thresholds.`}
+          scanningLabel={`Scanning ${crossScan!.matchesScanned} live matches, ${crossScan!.marketsScanned} markets and ${crossScan!.outcomesScanned} outcomes…`}
+          noTradeLabel={`PitchEdge scanned ${crossScan!.matchesScanned} live matches (${crossScan!.outcomesScanned} outcomes), but none met both the edge and confidence thresholds.`}
           closeButtonLabel="Scan again"
+          skipScanningDelay
           onRecordTrade={onRecordTrade}
-          onReject={onReject}
-          onClose={onClose}
+          onReject={() => finish(onReject)}
+          onClose={() => finish(onClose)}
           onViewTrades={onViewTrades}
         />
       ) : null}

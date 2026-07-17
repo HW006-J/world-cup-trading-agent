@@ -25,6 +25,7 @@ export function RecommendationModal({
   scanningLabel,
   noTradeLabel,
   closeButtonLabel = "Choose another match",
+  skipScanningDelay = false,
 }: {
   match: Match;
   scan: ScanResult;
@@ -38,8 +39,10 @@ export function RecommendationModal({
   noTradeLabel?: string;
   /** Overrides the approved-state "Choose another match" button text. */
   closeButtonLabel?: string;
+  /** Skip the built-in scanning delay — for callers that already show their own pre-reveal scanning state (e.g. BestEdgeScanner). */
+  skipScanningDelay?: boolean;
 }) {
-  const [isScanning, setIsScanning] = useState(true);
+  const [isScanning, setIsScanning] = useState(!skipScanningDelay);
   const [showReasoning, setShowReasoning] = useState(false);
   const [showClosest, setShowClosest] = useState(false);
   const [stakeInput, setStakeInput] = useState(DEFAULT_STAKE);
@@ -50,9 +53,10 @@ export function RecommendationModal({
   const hasApprovedRef = useRef(false);
 
   useEffect(() => {
+    if (skipScanningDelay) return;
     const timer = setTimeout(() => setIsScanning(false), SCAN_DELAY_MS);
     return () => clearTimeout(timer);
-  }, []);
+  }, [skipScanningDelay]);
 
   const matchLabel = `${match.home.name} vs ${match.away.name}`;
 
