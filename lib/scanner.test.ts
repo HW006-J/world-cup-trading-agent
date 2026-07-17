@@ -48,7 +48,7 @@ test("scanMatch handles zero supported markets cleanly", () => {
 // MatchStatus is "live" | "upcoming" | "finished" (lib/types.ts) — the demo
 // fixture has exactly two "live" matches (bra-arg, eng-fra), one "upcoming"
 // (ger-esp) and one "finished" (por-ned). These tests exercise scanAllMatches
-// with that same live-only filter, mirroring components/BestEdgeScanner.tsx.
+// with that same live-only filter, mirroring lib/monitoring/useMarketMonitor.ts.
 function liveMatches() {
   return demoProvider.getMatches().filter((m) => m.status === "live");
 }

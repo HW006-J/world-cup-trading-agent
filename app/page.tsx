@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { Header } from "@/components/Header";
 import { SourceBanner } from "@/components/SourceBanner";
-import { BestEdgeScanner } from "@/components/BestEdgeScanner";
+import { MonitorLauncher } from "@/components/MonitorLauncher";
+import { MarketMonitor } from "@/components/MarketMonitor";
 import { TradeHistoryModal } from "@/components/TradeHistoryModal";
 import { AdvancedAnalysisSection } from "@/components/AdvancedAnalysisSection";
 import { Disclaimer } from "@/components/Disclaimer";
@@ -29,7 +30,7 @@ function getInitialTrades(): PaperTrade[] {
 }
 
 export default function Home() {
-  const [scannerActive, setScannerActive] = useState(false);
+  const [monitoringActive, setMonitoringActive] = useState(false);
   const [showTradeHistory, setShowTradeHistory] = useState(false);
   const [showReplay, setShowReplay] = useState(false);
   const [trades, setTrades] = useState<PaperTrade[]>(getInitialTrades);
@@ -50,8 +51,7 @@ export default function Home() {
     });
   }
 
-  function handleReject() {
-    setScannerActive(false);
+  function handleRejectToast() {
     setToast("Trade rejected");
   }
 
@@ -70,17 +70,20 @@ export default function Home() {
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
         <SourceBanner meta={demoProvider.getMeta()} />
 
-        <BestEdgeScanner
-          active={scannerActive}
-          onStart={() => setScannerActive(true)}
-          onRecordTrade={handleRecordTrade}
-          onReject={handleReject}
-          onClose={() => setScannerActive(false)}
-          onViewTrades={() => {
-            setScannerActive(false);
-            setShowTradeHistory(true);
-          }}
-        />
+        {monitoringActive ? (
+          <MarketMonitor
+            trades={trades}
+            onRecordTrade={handleRecordTrade}
+            onRejectToast={handleRejectToast}
+            onExit={() => setMonitoringActive(false)}
+            onViewTrades={() => {
+              setMonitoringActive(false);
+              setShowTradeHistory(true);
+            }}
+          />
+        ) : (
+          <MonitorLauncher onStart={() => setMonitoringActive(true)} />
+        )}
 
         {showReplay ? (
           <ReplayView
