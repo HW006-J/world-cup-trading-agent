@@ -11,7 +11,7 @@ import { Modal } from "./Modal";
 import { ExplainabilityPanel } from "./ExplainabilityPanel";
 import { Stat } from "./ui";
 
-const SCAN_DELAY_MS = 450;
+const DEFAULT_SCAN_DELAY_MS = 450;
 const DEFAULT_STAKE = "10";
 const HEADING_ID = "recommendation-modal-heading";
 
@@ -25,7 +25,7 @@ export function RecommendationModal({
   scanningLabel,
   noTradeLabel,
   closeButtonLabel = "Choose another match",
-  skipScanningDelay = false,
+  scanDelayMs = DEFAULT_SCAN_DELAY_MS,
 }: {
   match: Match;
   scan: ScanResult;
@@ -39,10 +39,10 @@ export function RecommendationModal({
   noTradeLabel?: string;
   /** Overrides the approved-state "Choose another match" button text. */
   closeButtonLabel?: string;
-  /** Skip the built-in scanning delay — for callers that already show their own pre-reveal scanning state (e.g. BestEdgeScanner). */
-  skipScanningDelay?: boolean;
+  /** How long the built-in scanning state stays visible before revealing the result. Defaults to 450ms. */
+  scanDelayMs?: number;
 }) {
-  const [isScanning, setIsScanning] = useState(!skipScanningDelay);
+  const [isScanning, setIsScanning] = useState(true);
   const [showReasoning, setShowReasoning] = useState(false);
   const [showClosest, setShowClosest] = useState(false);
   const [stakeInput, setStakeInput] = useState(DEFAULT_STAKE);
@@ -52,11 +52,14 @@ export function RecommendationModal({
   // double submit) before the approved-state re-render swaps the form out.
   const hasApprovedRef = useRef(false);
 
+  // A single timer drives the transition from scanning to result, within
+  // this same mounted modal — no unmount/remount, so no flicker. Cleaned up
+  // on unmount or if scanDelayMs itself ever changed (it doesn't, in
+  // practice, for a given modal instance).
   useEffect(() => {
-    if (skipScanningDelay) return;
-    const timer = setTimeout(() => setIsScanning(false), SCAN_DELAY_MS);
+    const timer = setTimeout(() => setIsScanning(false), scanDelayMs);
     return () => clearTimeout(timer);
-  }, [skipScanningDelay]);
+  }, [scanDelayMs]);
 
   const matchLabel = `${match.home.name} vs ${match.away.name}`;
 
