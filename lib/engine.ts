@@ -147,9 +147,13 @@ function buildWinShareFactors(
       label: "Red cards",
       contribution: weights.redCards * redDiff,
       detail:
-        stats.redCards[0] + stats.redCards[1] === 0
-          ? "No red cards"
-          : `${stats.redCards[0]} vs ${stats.redCards[1]}`,
+        stats.redCards[0] === stats.redCards[1]
+          ? stats.redCards[0] === 0
+            ? "No red cards"
+            : `${stats.redCards[0]} apiece`
+          : stats.redCards[0] > stats.redCards[1]
+            ? `${match.home.shortName} down to ten men (${stats.redCards[0]} red card${stats.redCards[0] === 1 ? "" : "s"})`
+            : `${match.away.shortName} down to ten men (${stats.redCards[1]} red card${stats.redCards[1] === 1 ? "" : "s"})`,
     },
     {
       id: "strength",

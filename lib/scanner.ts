@@ -80,3 +80,54 @@ export function scanMatch(
     closest: ranked[0] ?? null,
   };
 }
+
+/** An opportunity found while scanning across multiple matches, tagged with which one it came from. */
+export interface CrossMatchOpportunity extends Opportunity {
+  match: Match;
+}
+
+export interface CrossMatchScanResult {
+  matchesScanned: number;
+  marketsScanned: number;
+  outcomesScanned: number;
+  /** Every evaluated opportunity across every scanned match, ranked strongest first. */
+  opportunities: CrossMatchOpportunity[];
+  /** The strongest opportunity that clears the BUY threshold, across all scanned matches, if any. */
+  best: CrossMatchOpportunity | null;
+  /** The single best-ranked opportunity overall across all scanned matches, qualifying or not. */
+  closest: CrossMatchOpportunity | null;
+}
+
+/**
+ * Scans every supported market and outcome across every given match (via the
+ * same per-match scanMatch/computeAnalysis pipeline, never a separate
+ * implementation) and ranks the combined results with the identical
+ * BUY-then-edge-then-confidence ordering, so "the strongest live edge" means
+ * exactly the same thing whether it's found within one match or across many.
+ */
+export function scanAllMatches(matches: Match[], provider: MatchDataProvider): CrossMatchScanResult {
+  let marketsScanned = 0;
+  let outcomesScanned = 0;
+  const opportunities: CrossMatchOpportunity[] = [];
+
+  for (const match of matches) {
+    const markets = provider.getSupportedMarkets(match);
+    const scan = scanMatch(match, provider, markets);
+    marketsScanned += scan.marketsScanned;
+    outcomesScanned += scan.outcomesScanned;
+    for (const opportunity of scan.opportunities) {
+      opportunities.push({ ...opportunity, match });
+    }
+  }
+
+  const ranked = [...opportunities].sort(compareOpportunities);
+
+  return {
+    matchesScanned: matches.length,
+    marketsScanned,
+    outcomesScanned,
+    opportunities: ranked,
+    best: ranked.find((o) => o.analysis.signal === "BUY") ?? null,
+    closest: ranked[0] ?? null,
+  };
+}

@@ -1,20 +1,19 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { Header } from "@/components/Header";
 import { SourceBanner } from "@/components/SourceBanner";
-import { MatchSelector } from "@/components/MatchSelector";
-import { RecommendationModal } from "@/components/RecommendationModal";
+import { BestEdgeScanner } from "@/components/BestEdgeScanner";
 import { TradeHistoryModal } from "@/components/TradeHistoryModal";
 import { AdvancedAnalysisSection } from "@/components/AdvancedAnalysisSection";
 import { Disclaimer } from "@/components/Disclaimer";
+import { ReplayLauncher } from "@/components/replay/ReplayLauncher";
+import { ReplayView } from "@/components/replay/ReplayView";
 import { demoProvider } from "@/lib/demoData";
-import { scanMatch } from "@/lib/scanner";
 import { SEED_TRADES } from "@/lib/seedTrades";
 import { loadStoredTrades, saveStoredTrades } from "@/lib/tradeStorage";
 import type { PaperTrade } from "@/lib/types";
 
-const matches = demoProvider.getMatches();
 const SEED_IDS = new Set(SEED_TRADES.map((t) => t.id));
 
 const TOAST_DURATION_MS = 2500;
@@ -30,8 +29,9 @@ function getInitialTrades(): PaperTrade[] {
 }
 
 export default function Home() {
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [scannerActive, setScannerActive] = useState(false);
   const [showTradeHistory, setShowTradeHistory] = useState(false);
+  const [showReplay, setShowReplay] = useState(false);
   const [trades, setTrades] = useState<PaperTrade[]>(getInitialTrades);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -40,12 +40,6 @@ export default function Home() {
     const timer = setTimeout(() => setToast(null), TOAST_DURATION_MS);
     return () => clearTimeout(timer);
   }, [toast]);
-
-  const match = matches.find((m) => m.id === selectedMatchId) ?? null;
-  const scan = useMemo(
-    () => (match ? scanMatch(match, demoProvider, demoProvider.getSupportedMarkets(match)) : null),
-    [match],
-  );
 
   function handleRecordTrade(trade: PaperTrade) {
     setTrades((prev) => {
@@ -57,8 +51,16 @@ export default function Home() {
   }
 
   function handleReject() {
-    setSelectedMatchId(null);
+    setScannerActive(false);
     setToast("Trade rejected");
+  }
+
+  function handleSettleTrade(trade: PaperTrade) {
+    setTrades((prev) => {
+      const next = prev.map((t) => (t.id === trade.id ? trade : t));
+      saveStoredTrades(next.filter((t) => !SEED_IDS.has(t.id)));
+      return next;
+    });
   }
 
   return (
@@ -68,7 +70,31 @@ export default function Home() {
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
         <SourceBanner meta={demoProvider.getMeta()} />
 
-        <MatchSelector matches={matches} onSelect={setSelectedMatchId} />
+        <BestEdgeScanner
+          active={scannerActive}
+          onStart={() => setScannerActive(true)}
+          onRecordTrade={handleRecordTrade}
+          onReject={handleReject}
+          onClose={() => setScannerActive(false)}
+          onViewTrades={() => {
+            setScannerActive(false);
+            setShowTradeHistory(true);
+          }}
+        />
+
+        {showReplay ? (
+          <ReplayView
+            onExit={() => setShowReplay(false)}
+            onRecordTrade={handleRecordTrade}
+            onSettleTrade={handleSettleTrade}
+            onViewTrades={() => {
+              setShowReplay(false);
+              setShowTradeHistory(true);
+            }}
+          />
+        ) : (
+          <ReplayLauncher onStart={() => setShowReplay(true)} />
+        )}
 
         <div className="flex justify-center">
           <button
@@ -84,21 +110,6 @@ export default function Home() {
       </main>
 
       <Disclaimer />
-
-      {match && scan ? (
-        <RecommendationModal
-          key={match.id}
-          match={match}
-          scan={scan}
-          onRecordTrade={handleRecordTrade}
-          onReject={handleReject}
-          onClose={() => setSelectedMatchId(null)}
-          onViewTrades={() => {
-            setSelectedMatchId(null);
-            setShowTradeHistory(true);
-          }}
-        />
-      ) : null}
 
       {showTradeHistory ? (
         <TradeHistoryModal trades={trades} onClose={() => setShowTradeHistory(false)} />

@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test lib/scanner.test.ts lib/dataSource.test.ts lib/txline/normalize.test.ts"
+    "test": "node --test lib/scanner.test.ts lib/dataSource.test.ts lib/txline/normalize.test.ts lib/trade.test.ts lib/replay/reducer.test.ts"
   },
   "dependencies": {
     "next": "16.2.10",

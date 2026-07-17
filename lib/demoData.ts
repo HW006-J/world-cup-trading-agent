@@ -141,7 +141,7 @@ const ODDS: Record<string, Record<MarketId, OddsBySelection>> = {
   },
 };
 
-function selectionsFor(match: Match, marketId: MarketId): MarketSelection[] {
+export function selectionsFor(match: Match, marketId: MarketId): MarketSelection[] {
   switch (marketId) {
     case "matchWinner":
       return [

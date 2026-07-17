@@ -22,6 +22,9 @@ export function RecommendationModal({
   onReject,
   onClose,
   onViewTrades,
+  scanningLabel,
+  noTradeLabel,
+  closeButtonLabel = "Choose another match",
 }: {
   match: Match;
   scan: ScanResult;
@@ -29,6 +32,12 @@ export function RecommendationModal({
   onReject: () => void;
   onClose: () => void;
   onViewTrades: () => void;
+  /** Overrides the "Scanning N markets (M outcomes) for X vs Y…" caption, e.g. for a cross-match scan. */
+  scanningLabel?: string;
+  /** Overrides the "PitchEdge scanned N outcomes, but none met…" caption, e.g. for a cross-match scan. */
+  noTradeLabel?: string;
+  /** Overrides the approved-state "Choose another match" button text. */
+  closeButtonLabel?: string;
 }) {
   const [isScanning, setIsScanning] = useState(true);
   const [showReasoning, setShowReasoning] = useState(false);
@@ -82,8 +91,8 @@ export function RecommendationModal({
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-accent" aria-hidden />
           <p id={HEADING_ID} className="text-sm text-muted">
-            Scanning {scan.marketsScanned} markets ({scan.outcomesScanned} outcomes) for{" "}
-            {matchLabel}&hellip;
+            {scanningLabel ??
+              `Scanning ${scan.marketsScanned} markets (${scan.outcomesScanned} outcomes) for ${matchLabel}…`}
           </p>
         </div>
       </Modal>
@@ -108,7 +117,7 @@ export function RecommendationModal({
           </p>
           <div className="mt-2 flex flex-wrap justify-center gap-2">
             <button type="button" onClick={onClose} className={primaryButton}>
-              Choose another match
+              {closeButtonLabel}
             </button>
             <button type="button" onClick={onViewTrades} className={neutralButton}>
               View paper trades
@@ -148,8 +157,8 @@ export function RecommendationModal({
           </h2>
           <p className="text-sm text-muted">{matchLabel}</p>
           <p className="text-sm text-foreground">
-            PitchEdge scanned {scan.outcomesScanned} outcomes, but none met both the edge and
-            confidence thresholds.
+            {noTradeLabel ??
+              `PitchEdge scanned ${scan.outcomesScanned} outcomes, but none met both the edge and confidence thresholds.`}
           </p>
 
           {showClosest && closest && closestNarrative ? (

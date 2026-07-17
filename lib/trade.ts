@@ -1,4 +1,4 @@
-import type { AnalysisResult, Match, PaperTrade } from "./types";
+import type { AnalysisResult, Match, PaperTrade, TradeStatus } from "./types";
 
 /** Builds a new open paper trade record from an analysed opportunity and a stake. */
 export function buildPaperTrade(params: {
@@ -26,4 +26,14 @@ export function buildPaperTrade(params: {
     status: "open",
     pnl: null,
   };
+}
+
+/**
+ * Settles an open paper trade to won/lost and computes its realised P&L.
+ * The single source of truth for settlement math, so a win/loss is always
+ * `stake * (odds - 1)` profit or `-stake` loss, wherever it's triggered from.
+ */
+export function settleTrade(trade: PaperTrade, outcome: Extract<TradeStatus, "won" | "lost">): PaperTrade {
+  const pnl = outcome === "won" ? trade.stake * (trade.odds - 1) : -trade.stake;
+  return { ...trade, status: outcome, pnl };
 }
