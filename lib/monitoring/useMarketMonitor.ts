@@ -1,20 +1,30 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { demoProvider } from "@/lib/demoData";
-import { scanAllMatches } from "@/lib/scanner";
-import type { PaperTrade } from "@/lib/types";
+import { fetchPublicSnapshot } from "@/lib/txline/publicSnapshot";
+import type { CrossMatchScanResult } from "@/lib/scanner";
+import type { PaperTrade, ProviderMeta } from "@/lib/types";
 import { createMonitorEngine, type MonitorEngine } from "./engine";
 import { tradeFingerprint } from "./fingerprint";
+import { runLiveScan } from "./liveScan";
 import { INITIAL_MONITOR_STATE, type MonitorState } from "./reducer";
 
-// "Monitoring" means genuinely in-play matches only — see BestEdgeScanner's
-// former LIVE_MATCHES comment / MatchStatus in lib/types.ts.
-const LIVE_MATCHES = demoProvider.getMatches().filter((m) => m.status === "live");
+const EMPTY_SCAN_RESULT: CrossMatchScanResult = {
+  matchesScanned: 0,
+  marketsScanned: 0,
+  outcomesScanned: 0,
+  opportunities: [],
+  best: null,
+  closest: null,
+};
+
+const DATA_ERROR_MESSAGE = "Live data is temporarily unavailable.";
 
 export interface UseMarketMonitorResult {
   state: MonitorState;
   liveMatchCount: number;
+  providerMeta: ProviderMeta | null;
+  dataError: string | null;
   start: () => void;
   pause: () => void;
   resume: () => void;
@@ -39,11 +49,34 @@ export function useMarketMonitor(trades: PaperTrade[]): UseMarketMonitorResult {
   }, [trades]);
 
   const [state, setState] = useState<MonitorState>(INITIAL_MONITOR_STATE);
+  const [liveMatchCount, setLiveMatchCount] = useState(0);
+  const [providerMeta, setProviderMeta] = useState<ProviderMeta | null>(null);
+  const [dataError, setDataError] = useState<string | null>(null);
   const engineRef = useRef<MonitorEngine | null>(null);
+  // Holds the last scan that succeeded end-to-end (fetch + parse + scan), so
+  // a failed poll can keep showing that result instead of blanking the UI.
+  const lastGoodScanRef = useRef<CrossMatchScanResult>(EMPTY_SCAN_RESULT);
 
   useEffect(() => {
+    async function scan(): Promise<CrossMatchScanResult> {
+      try {
+        const { scan: result, liveMatchCount: count, meta } = await runLiveScan(fetchPublicSnapshot);
+
+        lastGoodScanRef.current = result;
+        setLiveMatchCount(count);
+        setProviderMeta(meta);
+        setDataError(null);
+        return result;
+      } catch {
+        // Never surface the caught error's message — it may originate from
+        // fetch/network internals. Only ever show the fixed, user-safe copy.
+        setDataError(DATA_ERROR_MESSAGE);
+        return lastGoodScanRef.current;
+      }
+    }
+
     const engine = createMonitorEngine({
-      scan: () => scanAllMatches(LIVE_MATCHES, demoProvider),
+      scan,
       getExistingTradeFingerprints: () => new Set(tradesRef.current.map(tradeFingerprint)),
     });
     engineRef.current = engine;
@@ -68,5 +101,5 @@ export function useMarketMonitor(trades: PaperTrade[]): UseMarketMonitorResult {
     [],
   );
 
-  return { state, liveMatchCount: LIVE_MATCHES.length, ...controls };
+  return { state, liveMatchCount, providerMeta, dataError, ...controls };
 }
