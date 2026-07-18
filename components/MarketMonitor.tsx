@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { RecommendationModal } from "@/components/RecommendationModal";
 import { Pill } from "@/components/ui";
-import { demoProvider } from "@/lib/demoData";
 import { formatOdds, formatPp } from "@/lib/format";
 import { useMarketMonitor } from "@/lib/monitoring/useMarketMonitor";
 import type { CrossMatchOpportunity, ScanResult } from "@/lib/scanner";
@@ -68,7 +67,7 @@ export function MarketMonitor({
   onViewTrades: () => void;
 }) {
   const monitor = useMarketMonitor(trades);
-  const { state, liveMatchCount } = monitor;
+  const { state, liveMatchCount, providerMeta, dataError } = monitor;
 
   useEffect(() => {
     monitor.start();
@@ -89,7 +88,7 @@ export function MarketMonitor({
   const isRunning = state.runState === "running";
   const matchesMonitored = state.latestScan?.matchesScanned ?? liveMatchCount;
   const currentOpportunity = state.latestScan ? (state.latestScan.best ?? state.latestScan.closest) : null;
-  const sourceLabel = demoProvider.getMeta().source === "txline" ? "Source: Live TxLINE data" : "Source: Demo data";
+  const sourceLabel = providerMeta?.source === "txline" ? "Source: Live TxLINE data" : "Source: Demo data";
 
   const alertedOpportunity: CrossMatchOpportunity | null = state.alertedScan
     ? (state.alertedScan.best ?? state.alertedScan.closest)
@@ -143,6 +142,8 @@ export function MarketMonitor({
           {!isRunning && state.runState === "paused" ? " · Paused" : ""}
         </p>
       </div>
+
+      {dataError ? <p className="text-xs text-muted">{dataError}</p> : null}
 
       {currentOpportunity ? (
         <CurrentOpportunityCard opportunity={currentOpportunity} />
