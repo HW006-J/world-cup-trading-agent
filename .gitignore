@@ -40,3 +40,7 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Temporary ML files
+ml/models/*.joblib
+ml/data/processed/next_goal_none.csv
