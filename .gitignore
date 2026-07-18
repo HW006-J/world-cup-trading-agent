@@ -48,7 +48,19 @@ next-env.d.ts
 # Generated ML files
 ml/models/*.joblib
 ml/data/processed/next_goal_none.csv
+ml/data/processed/statsbomb_next_goal_none.csv
+ml/data/processed/next_goal_none_combined.csv
 
 # Downloaded proprietary TxLINE data
 ml/data/raw/*
 !ml/data/raw/.gitkeep
+
+# Downloaded StatsBomb Open Data (public, but large -- re-downloadable via
+# ml/download_statsbomb.py, not committed)
+ml/data/external/statsbomb/*
+!ml/data/external/statsbomb/.gitkeep
+ml/data/external/statsbomb/events/*
+!ml/data/external/statsbomb/events/.gitkeep
+
+# Generated download tracker
+ml/reports/world_cup_fixture_download_tracker.csv

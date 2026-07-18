@@ -1,0 +1,5 @@
+Fixtures processed: 14
+Fixtures skipped: 0
+Snapshot rows written: 89
+Fixtures with no Score data at all (red cards defaulted to 0 for every row): [17588227]
+Output: /Users/henrywhite/Developer/world-cup-trading-agent/ml/data/processed/next_goal_none.csv
