@@ -2,23 +2,20 @@ import "server-only";
 import type { Match, MarketDefinition, MarketId, MarketSelection, MatchDataProvider, OddsBySelection } from "../types.ts";
 import { assertTxLineCredentials } from "../dataSource.ts";
 import { getFixturesSnapshot, getOddsSnapshot, getScoresSnapshot, startGuestSession, type TxLineAuth } from "./client.ts";
+import { restrictToTradeableMarket } from "./marketRestriction.ts";
 import { normalizeFixture, normalizeOdds, normalizeScore } from "./normalize.ts";
 import type { RawScoresEntry } from "./types.ts";
 
 // ---------------------------------------------------------------------------
-// Dormant TxLINE provider factory.
-//
-// NOT called anywhere in the running app yet — demo mode remains the only
-// operational mode until TXLINE_API_TOKEN is configured (see
-// lib/dataSource.ts). This exists so that, once real credentials are added,
-// swapping the app over to live data is a matter of awaiting this factory
-// once (e.g. in a Server Component) instead of `demoProvider` — no changes
-// to the UI, scanner or probability engine required.
+// Live TxLINE provider factory.
 //
 // The MatchDataProvider interface is synchronous (matching the existing
 // demo provider and every component that consumes it). This factory does
 // all the async fetching + normalization up front and returns a plain
 // synchronous snapshot, rather than making MatchDataProvider itself async.
+//
+// See lib/txline/marketRestriction.ts for why every fixture's markets are
+// restricted to nextGoal/none only before being exposed here.
 // ---------------------------------------------------------------------------
 
 interface FixtureSnapshot {
@@ -65,10 +62,12 @@ export async function createTxLineProvider(): Promise<MatchDataProvider> {
       getOddsSnapshot(auth, rawFixture.FixtureId),
       getScoresSnapshot(auth, rawFixture.FixtureId),
     ]);
-    const { markets, selectionsByMarket, oddsByMarket, totalGoalsLine } = normalizeOdds(
-      rawOdds,
-      normalizedFixture.home,
-      normalizedFixture.away,
+    const normalizedOdds = normalizeOdds(rawOdds, normalizedFixture.home, normalizedFixture.away);
+    const { totalGoalsLine } = normalizedOdds;
+    const { markets, selectionsByMarket, oddsByMarket } = restrictToTradeableMarket(
+      normalizedOdds.markets,
+      normalizedOdds.selectionsByMarket,
+      normalizedOdds.oddsByMarket,
     );
 
     const baseMatch: Match = {

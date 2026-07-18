@@ -3,35 +3,34 @@
 import { useEffect, useState } from "react";
 import { Header } from "@/components/Header";
 import { SourceBanner } from "@/components/SourceBanner";
-import { MonitorLauncher } from "@/components/MonitorLauncher";
 import { MarketMonitor } from "@/components/MarketMonitor";
-import { TradeHistoryModal } from "@/components/TradeHistoryModal";
-import { AdvancedAnalysisSection } from "@/components/AdvancedAnalysisSection";
+import { TradeHistory } from "@/components/TradeHistory";
 import { Disclaimer } from "@/components/Disclaimer";
-import { ReplayLauncher } from "@/components/replay/ReplayLauncher";
-import { ReplayView } from "@/components/replay/ReplayView";
-import { SEED_TRADES } from "@/lib/seedTrades";
+import { HistoricalAnalysis } from "@/components/HistoricalAnalysis";
 import { loadStoredTrades, saveStoredTrades } from "@/lib/tradeStorage";
-import type { DataSourceMode, PaperTrade } from "@/lib/types";
-
-const SEED_IDS = new Set(SEED_TRADES.map((t) => t.id));
+import type { PaperTrade } from "@/lib/types";
 
 const TOAST_DURATION_MS = 2500;
 
-// trades is never part of the initial DOM (the history modal starts closed),
+type Tab = "live" | "historical" | "trades";
+
+const TABS: { id: Tab; label: string }[] = [
+  { id: "live", label: "Live Market" },
+  { id: "historical", label: "Historical Analysis" },
+  { id: "trades", label: "Paper Trades" },
+];
+
+// trades is never part of the initial DOM (the history tab starts hidden),
 // so reading localStorage in the useState initializer can't cause a
-// hydration mismatch — it only ever runs on the client anyway.
+// hydration mismatch — it only ever runs on the client anyway. No seeded
+// trades are mixed in here (see the old lib/seedTrades.ts, removed) --
+// every trade a real user sees was created from a real live TxLINE fixture.
 function getInitialTrades(): PaperTrade[] {
-  const stored = loadStoredTrades();
-  if (stored.length === 0) return SEED_TRADES;
-  const restored = stored.filter((t) => !SEED_IDS.has(t.id));
-  return [...SEED_TRADES, ...restored];
+  return loadStoredTrades();
 }
 
-export function HomeClient({ dataSource }: { dataSource: DataSourceMode }) {
-  const [monitoringActive, setMonitoringActive] = useState(false);
-  const [showTradeHistory, setShowTradeHistory] = useState(false);
-  const [showReplay, setShowReplay] = useState(false);
+export function HomeClient() {
+  const [activeTab, setActiveTab] = useState<Tab>("live");
   const [trades, setTrades] = useState<PaperTrade[]>(getInitialTrades);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -45,7 +44,7 @@ export function HomeClient({ dataSource }: { dataSource: DataSourceMode }) {
     setTrades((prev) => {
       if (prev.some((t) => t.id === trade.id)) return prev;
       const next = [trade, ...prev];
-      saveStoredTrades(next.filter((t) => !SEED_IDS.has(t.id)));
+      saveStoredTrades(next);
       return next;
     });
   }
@@ -54,68 +53,58 @@ export function HomeClient({ dataSource }: { dataSource: DataSourceMode }) {
     setToast("Trade rejected");
   }
 
-  function handleSettleTrade(trade: PaperTrade) {
-    setTrades((prev) => {
-      const next = prev.map((t) => (t.id === trade.id ? trade : t));
-      saveStoredTrades(next.filter((t) => !SEED_IDS.has(t.id)));
-      return next;
-    });
-  }
-
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <Header />
+      <Header right={<SourceBanner />} />
 
-      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-4 py-8 sm:px-6">
-        <SourceBanner dataSource={dataSource} />
+      <div className="border-b border-border bg-surface">
+        <nav className="mx-auto flex w-full max-w-6xl gap-1 px-4 py-2 sm:px-6" aria-label="Primary">
+          {TABS.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setActiveTab(tab.id)}
+              aria-current={activeTab === tab.id ? "page" : undefined}
+              className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm ${
+                activeTab === tab.id
+                  ? "bg-accent text-white"
+                  : "text-muted hover:bg-surface-elevated hover:text-foreground"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </nav>
+      </div>
 
-        {monitoringActive ? (
+      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+        {/* Kept mounted (just hidden) rather than conditionally rendered when
+            switching tabs -- unmounting would destroy useMarketMonitor's
+            engine (see lib/monitoring/useMarketMonitor.ts) and silently stop
+            live monitoring just because the user glanced at Paper Trades. */}
+        <div className={activeTab === "live" ? "" : "hidden"}>
           <MarketMonitor
             trades={trades}
             onRecordTrade={handleRecordTrade}
             onRejectToast={handleRejectToast}
-            onExit={() => setMonitoringActive(false)}
-            onViewTrades={() => {
-              setMonitoringActive(false);
-              setShowTradeHistory(true);
-            }}
+            onViewTrades={() => setActiveTab("trades")}
           />
-        ) : (
-          <MonitorLauncher onStart={() => setMonitoringActive(true)} />
-        )}
-
-        {showReplay ? (
-          <ReplayView
-            onExit={() => setShowReplay(false)}
-            onRecordTrade={handleRecordTrade}
-            onSettleTrade={handleSettleTrade}
-            onViewTrades={() => {
-              setShowReplay(false);
-              setShowTradeHistory(true);
-            }}
-          />
-        ) : (
-          <ReplayLauncher onStart={() => setShowReplay(true)} />
-        )}
-
-        <div className="flex justify-center">
-          <button
-            type="button"
-            onClick={() => setShowTradeHistory(true)}
-            className="text-sm font-medium text-accent hover:underline"
-          >
-            View paper trades
-          </button>
         </div>
 
-        <AdvancedAnalysisSection onRecordTrade={handleRecordTrade} />
+        {activeTab === "historical" ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <HistoricalAnalysis />
+          </div>
+        ) : null}
+
+        {activeTab === "trades" ? (
+          <div className="mx-auto w-full max-w-3xl">
+            <TradeHistory trades={trades} />
+          </div>
+        ) : null}
       </main>
 
       <Disclaimer />
-
-      {showTradeHistory ? (
-        <TradeHistoryModal trades={trades} onClose={() => setShowTradeHistory(false)} />
-      ) : null}
 
       {toast ? (
         <div

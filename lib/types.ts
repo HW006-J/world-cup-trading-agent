@@ -135,6 +135,26 @@ export interface AnalysisResult {
 
 export type TradeStatus = "open" | "won" | "lost";
 
+/**
+ * Where a PaperTrade's fixture and odds genuinely came from. PitchEdge v1
+ * only ever creates a trade from a live TxLINE fixture with a real,
+ * currently-published nextGoal/none price and a trained-model prediction --
+ * see lib/trade.ts's buildPaperTrade() precondition and
+ * lib/scanner.ts/lib/model/. There is deliberately no "historical" or
+ * "demo" provenance value: historical analysis has no real market odds to
+ * trade against (see the historical-analysis mode), and demo data is never
+ * wired into a production trade at all.
+ */
+export interface PaperTradeProvenance {
+  /** The live provider's own fixture id (Match.id) this trade was opened against. */
+  fixtureId: string;
+  provider: "txline_live";
+  /** ISO timestamp of the live snapshot (ProviderMeta.asOf) the odds were read from. */
+  marketOddsAsOf: string;
+  /** Always "trained_model" -- a trade can only ever be created when the trained model's prediction was available. */
+  probabilitySource: "trained_model";
+}
+
 export interface PaperTrade {
   id: string;
   timestamp: string;
@@ -151,6 +171,7 @@ export interface PaperTrade {
   status: TradeStatus;
   /** Realised profit/loss. Null while the trade is still open. */
   pnl: number | null;
+  provenance: PaperTradeProvenance;
 }
 
 /**

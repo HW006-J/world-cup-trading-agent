@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PitchEdge — Explainable Live Football Trading Agent",
+  title: "GoalEdge — Explainable Live Football Trading Agent",
   description:
-    "An explainable live football trading agent for the TxODDS World Cup Hackathon: live odds, model fair probability, mispricing signals, and paper trading on simulated demo data.",
+    "An explainable live football trading agent for the TxODDS World Cup Hackathon: live TxLINE odds, trained-model fair probability, mispricing signals, and paper trading only.",
 };
 
 export default function RootLayout({

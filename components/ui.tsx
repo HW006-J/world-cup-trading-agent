@@ -35,7 +35,7 @@ export function Panel({
   );
 }
 
-type Tone = "buy" | "pass" | "negative" | "neutral" | "accent";
+type Tone = "buy" | "pass" | "negative" | "neutral" | "accent" | "market";
 
 const TONE_CLASSES: Record<Tone, string> = {
   buy: "bg-buy-soft text-buy border-buy/30",
@@ -43,6 +43,9 @@ const TONE_CLASSES: Record<Tone, string> = {
   negative: "bg-negative-soft text-negative border-negative/30",
   neutral: "bg-surface-elevated text-muted border-border",
   accent: "bg-accent/10 text-accent border-accent/30",
+  // TxLINE-market-sourced values -- kept visually distinct from "accent"
+  // (the trained model's own output).
+  market: "bg-market-soft text-market border-market/30",
 };
 
 export function Stat({

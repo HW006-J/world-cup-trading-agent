@@ -4,7 +4,13 @@ import {
   type FixtureGoalHistoryState,
   type GoalHistoryTracker,
 } from "./goalHistoryTracker.ts";
-import { scanAllMatches, type CrossMatchScanResult, type MatchGoalHistoryContext } from "../scanner.ts";
+import {
+  compareOpportunities,
+  scanAllMatches,
+  type CrossMatchOpportunity,
+  type CrossMatchScanResult,
+  type MatchGoalHistoryContext,
+} from "../scanner.ts";
 import { providerFromSnapshot, type PublicTxLineSnapshot } from "../txline/publicSnapshot.ts";
 import type { ProviderMeta } from "../types.ts";
 
@@ -35,6 +41,36 @@ function buildGoalHistoryByMatchId(
 }
 
 /**
+ * PitchEdge v1 product rule: never present an actionable trade
+ * recommendation when the trained model's prediction wasn't available --
+ * "insufficient observed history" or "ambiguous score transition" must
+ * never fill the UI with a heuristic-fallback-sourced BUY. Since the
+ * TxLINE provider already restricts every opportunity to nextGoal/none
+ * (see lib/txline/provider.ts), this simply neuters any BUY signal that
+ * isn't sourced from probabilitySource "trained_model" down to PASS --
+ * every other field (edgePp, confidence, fairProbability, the
+ * probabilityContextNote explaining why) is left untouched, so the UI can
+ * still show *why* no recommendation is being made. This does not change
+ * lib/engine.ts's or lib/scanner.ts's own EDGE_THRESHOLD_PP/
+ * CONFIDENCE_THRESHOLD -- it's a separate, live-monitoring-specific
+ * actionability gate layered on top of their already-computed signal.
+ */
+export function restrictToTrainedModelActionability(scan: CrossMatchScanResult): CrossMatchScanResult {
+  const opportunities: CrossMatchOpportunity[] = scan.opportunities.map((o) =>
+    o.analysis.signal === "BUY" && o.analysis.probabilitySource !== "trained_model"
+      ? { ...o, analysis: { ...o.analysis, signal: "PASS" } }
+      : o,
+  );
+  const ranked = [...opportunities].sort(compareOpportunities);
+  return {
+    ...scan,
+    opportunities: ranked,
+    best: ranked.find((o) => o.analysis.signal === "BUY") ?? null,
+    closest: ranked[0] ?? null,
+  };
+}
+
+/**
  * Fetches the public TxLINE snapshot, reconstructs a MatchDataProvider from
  * it, filters to genuinely in-play ("live") matches, feeds them through the
  * given (caller-owned, persisted-across-polls) GoalHistoryTracker to derive
@@ -61,9 +97,10 @@ export async function runLiveScan(
 
   const goalHistoryStates = observeLiveMatches(tracker, liveMatches);
   const goalHistoryByMatchId = buildGoalHistoryByMatchId(goalHistoryStates);
+  const rawScan = scanAllMatches(liveMatches, provider, goalHistoryByMatchId);
 
   return {
-    scan: scanAllMatches(liveMatches, provider, goalHistoryByMatchId),
+    scan: restrictToTrainedModelActionability(rawScan),
     liveMatchCount: liveMatches.length,
     meta: snapshot.meta,
     goalHistoryStates,

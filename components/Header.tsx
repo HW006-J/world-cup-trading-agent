@@ -1,12 +1,20 @@
-export function Header() {
+import type { ReactNode } from "react";
+
+export function Header({ right }: { right?: ReactNode }) {
   return (
     <header className="border-b border-border bg-surface">
-      <div className="mx-auto max-w-3xl px-4 py-6 text-center sm:px-6">
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">PitchEdge</h1>
-        <p className="mt-1 text-sm text-muted">
-          An autonomous football trading agent that scans the odds, proposes a paper trade, and
-          waits for your approval.
-        </p>
+      <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-3 px-4 py-4 sm:flex-row sm:px-6">
+        <div className="text-center sm:text-left">
+          <h1 className="text-xl font-extrabold tracking-tight sm:text-2xl">
+            <span className="text-accent">Goal</span>
+            <span className="text-foreground">Edge</span>
+          </h1>
+          <p className="mt-0.5 text-xs text-muted sm:text-sm">
+            An autonomous football trading agent that scans the odds, proposes a paper trade, and
+            waits for your approval.
+          </p>
+        </div>
+        {right}
       </div>
     </header>
   );
