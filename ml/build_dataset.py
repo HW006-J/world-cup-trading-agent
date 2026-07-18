@@ -1,10 +1,64 @@
 """Build ml/data/processed/next_goal_none.csv from downloaded raw TxLINE data.
 
 Reads ml/data/raw/{fixture_id}/scores_historical.json (as saved by
-download_replay.py -- the raw TxLINE `Scores` array, untouched) and
-reconstructs, per fixture, a chronological score/red-card timeline plus a
-goal-event list. From that it takes fixed-minute snapshots and writes one
-row per (fixture_id, snapshot_minute).
+download_replay.py) and reconstructs, per fixture, a chronological
+score/red-card timeline plus a goal-event list. From that it takes
+fixed-minute snapshots and writes one row per (fixture_id, snapshot_minute).
+
+CONFIRMED real raw record format -- verified directly against
+ml/data/raw/18222446/scores_historical.json (1307 records, inspected without
+printing the whole file). This is PascalCase, NOT the lowercase-first
+`Scores` schema the OpenAPI spec documents:
+
+  FixtureId, StartTime, Ts, Seq
+      StartTime is constant per fixture; Ts is each record's own wall-clock
+      timestamp. Both are Unix milliseconds (confirmed, not inferred --
+      StartTime=1783818000000, Ts ranged 1783465737795 to 1783828222499 in
+      the observed file). Seq is a dense 0..N-1 index, one per record.
+      Sorted here by (Ts, Seq) -- Ts primary, Seq secondary.
+
+  Participant1IsHome (bool)
+      Same meaning/usage as elsewhere in this codebase: which participant
+      is the home team.
+
+  GameState
+      Present on every record but UNRELIABLE: it read "scheduled" on
+      literally all 1307 records in the observed file, including ones deep
+      into extra time with goals already scored -- never read by this
+      module for anything.
+
+  Clock  (present on 1283/1307 observed records)
+      {"Running": bool, "Seconds": int}. Confirmed (by observing it climb
+      from 0 to 7428 -- ~123.8 minutes, consistent with a match that went
+      to extra time -- across the fixture's Ts span, pausing while
+      Running=false and resuming while Running=true) to be the cumulative
+      match-elapsed time in seconds since kickoff. minute = Seconds / 60.0.
+      A handful (19 of 1283) of isolated single-record glitches were
+      observed -- e.g. ...4964, 0, 4974... -- each immediately corrected by
+      the very next record, PLUS the terminal "stream ended" housekeeping
+      records carry a genuinely present-but-meaningless Clock: {"Running":
+      false, "Seconds": 0} that is never corrected by a later record (there
+      isn't one). reconstruct_timeline() guards against both: a new
+      Clock.Seconds reading is only accepted if it's >= the last confirmed
+      value, since elapsed match time cannot decrease. Without this the
+      terminal reset silently zeroed out the whole timeline's tail and
+      build_dataset.py produced zero snapshot rows for this fixture.
+      Carried forward when a record omits Clock (or Clock is null).
+
+  Score  (present, non-empty, on only 64/1307 observed records -- sparse)
+      Score.Participant1.Total.Goals / Score.Participant2.Total.Goals and
+      Score.Participant1.Total.RedCards / Score.Participant2.Total.RedCards.
+      A present Score/Total block is a full current-state snapshot -- an
+      omitted numeric field within it (e.g. no RedCards key at all) means
+      zero, not "unknown, carry forward". Carrying-forward only applies
+      when the whole Score key is absent or empty ({}) from a record --
+      see reconstruct_timeline().
+
+  Data, Stats, Clock-adjacent Parti1State/Parti2State
+      Present (Stats on every record; Data on 423/1307; Parti1State/
+      Parti2State on 120/1307 each) but not read by this module -- granular
+      match-event/statistical metadata, out of scope for v1 (matches the
+      shots/attacking-pressure exclusion rule below).
 
 This module is the single source of truth for:
   - SNAPSHOT_MINUTES: which match minutes get a snapshot row.
@@ -17,7 +71,8 @@ Leakage rules (see ml/README.md for the full writeup):
     feed a feature column.
   - label_next_goal_none is the only column allowed to look forward.
   - No odds/market data is read by this module at all.
-  - No shots/attacking-pressure fields are read (out of scope for v1).
+  - No shots/attacking-pressure fields are read (Data/Stats are ignored).
+  - Records whose Ts is before StartTime (pre-kickoff) are ignored entirely.
   - validate_no_leakage() asserts the written CSV's columns exactly match
     COLUMN_ORDER, so an accidental extra/future column fails loudly instead
     of silently shipping.
@@ -61,17 +116,6 @@ PROCESSED_DIR = Path(__file__).resolve().parent / "data" / "processed"
 PROCESSED_CSV = PROCESSED_DIR / "next_goal_none.csv"
 REPORTS_DIR = Path(__file__).resolve().parent / "reports"
 
-# Periods summed for team totals. HT is deliberately excluded: it duplicates
-# the H1 total rather than adding new events, mirroring the same convention
-# lib/txline/normalize.ts uses in sumSoccerScore() for RawSoccerTotalScore.
-SCORE_PERIODS = ["H1", "H2", "ET1", "ET2", "PE"]
-
-# Plausible match-length bounds (seconds) used to auto-detect whether raw
-# `ts`/`startTime` fields are unix seconds or unix milliseconds -- see the
-# UNCONFIRMED note in download_replay.py's module docstring. 3 hours covers
-# regulation + extra time + stoppage with margin.
-_MAX_PLAUSIBLE_MATCH_SECONDS = 3 * 60 * 60
-
 
 class DatasetBuildError(Exception):
     pass
@@ -83,6 +127,8 @@ class DatasetBuildError(Exception):
 
 
 def load_raw_scores(fixture_dir: Path) -> list[dict]:
+    """Load + validate scores_historical.json, sorted chronologically by
+    (Ts, Seq) -- Ts primary, Seq secondary, per the confirmed real schema."""
     scores_path = fixture_dir / "scores_historical.json"
     if not scores_path.exists():
         raise DatasetBuildError(f"{scores_path} does not exist")
@@ -90,14 +136,14 @@ def load_raw_scores(fixture_dir: Path) -> list[dict]:
     if not isinstance(entries, list):
         raise DatasetBuildError(f"{scores_path} does not contain a JSON array")
 
-    required = ("fixtureId", "ts", "startTime", "participant1IsHome", "seq")
+    required = ("FixtureId", "Ts", "StartTime", "Participant1IsHome", "Seq")
     for i, entry in enumerate(entries):
         missing = [f for f in required if f not in entry]
         if missing:
             raise DatasetBuildError(
                 f"{scores_path} entry {i} is missing required field(s): {missing}"
             )
-    return sorted(entries, key=lambda e: (e["seq"], e["ts"]))
+    return sorted(entries, key=lambda e: (e["Ts"], e["Seq"]))
 
 
 # ---------------------------------------------------------------------------
@@ -105,99 +151,108 @@ def load_raw_scores(fixture_dir: Path) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def _sum_period_field(total_score: Optional[dict], field: str) -> int:
-    if not total_score:
+def _team_total(score: Optional[dict], participant_key: str, field: str) -> int:
+    """Score.{participant_key}.Total.{field}, defaulting to 0 at any
+    missing level. A *present* Score block is a full current-state
+    snapshot, so an omitted numeric field within it means zero -- this is
+    only reached when Score itself is non-empty; carry-forward for an
+    absent/empty Score is handled by the caller, reconstruct_timeline()."""
+    if not score:
         return 0
-    total = 0
-    for period in SCORE_PERIODS:
-        block = total_score.get(period)
-        if block:
-            total += int(block.get(field, 0))
-    return total
-
-
-def infer_seconds_since_start(entry: dict) -> float:
-    """Best-effort elapsed-time estimate for one score-update entry.
-
-    Auto-detects whether ts/startTime are unix seconds or unix milliseconds.
-    Note dividing a small number by 1000 is *always* "plausible" too, so a
-    naive "does either interpretation fall in range" check can't
-    disambiguate small deltas -- a real elapsed-ms delta is only plausible
-    (< 3h) for well under a second of match time, whereas a real
-    elapsed-seconds delta is plausible for nearly the whole match. So: if
-    the raw delta itself already fits as a plausible seconds-elapsed value,
-    treat it as seconds (matches lib/txline/normalize.ts's own comment that
-    TxLINE fixture timestamps are unix seconds); only fall back to
-    milliseconds when the raw delta is too large to be seconds. Raises
-    DatasetBuildError if neither interpretation is plausible, rather than
-    silently picking one -- see the UNCONFIRMED unit note in
-    download_replay.py.
-    """
-    raw_delta = entry["ts"] - entry["startTime"]
-
-    if 0 <= raw_delta <= _MAX_PLAUSIBLE_MATCH_SECONDS:
-        return raw_delta
-
-    as_ms_to_seconds = raw_delta / 1000.0
-    if 0 <= as_ms_to_seconds <= _MAX_PLAUSIBLE_MATCH_SECONDS:
-        return as_ms_to_seconds
-
-    raise DatasetBuildError(
-        "Could not infer whether ts/startTime are unix seconds or "
-        f"milliseconds for fixture {entry.get('fixtureId')} (seq={entry.get('seq')}): "
-        f"raw delta={raw_delta} fits neither interpretation as a plausible "
-        "match-elapsed time. Not guessing -- see ml/README.md Blockers."
-    )
+    participant = score.get(participant_key) or {}
+    total = participant.get("Total") or {}
+    return int(total.get(field, 0) or 0)
 
 
 class TimelineEntry:
-    __slots__ = ("minute", "home_goals", "away_goals", "home_reds", "away_reds", "has_score_block")
+    __slots__ = ("minute", "home_goals", "away_goals", "home_reds", "away_reds", "has_score")
 
-    def __init__(self, minute, home_goals, away_goals, home_reds, away_reds, has_score_block):
+    def __init__(self, minute, home_goals, away_goals, home_reds, away_reds, has_score):
         self.minute = minute
         self.home_goals = home_goals
         self.away_goals = away_goals
         self.home_reds = home_reds
         self.away_reds = away_reds
-        self.has_score_block = has_score_block
+        self.has_score = has_score
 
 
 def reconstruct_timeline(raw_entries: list[dict]) -> list[TimelineEntry]:
     """Chronological (minute, home/away goals, home/away red cards) states.
 
+    Pre-kickoff entries (Ts < StartTime) are ignored entirely -- they carry
+    no meaningful match state and, in the observed real file, occur up to
+    ~4 days before StartTime.
+
+    Minute comes from Clock.Seconds / 60.0 (confirmed cumulative
+    match-elapsed seconds -- see module docstring), carried forward across
+    any entry that omits Clock (or has it null). If no Clock has been
+    confirmed yet at all (not observed in the real file -- Clock is present
+    from the first post-kickoff record onward there -- but defensively
+    handled), minute defaults to 0.0, the same "no data yet" convention the
+    red-card default below uses. GameState is never read (see module
+    docstring: it's unreliable on Devnet).
+
+    Clock monotonicity guard: a new Clock.Seconds reading is only accepted
+    if it is >= the last confirmed value -- match-elapsed time cannot
+    decrease. Confirmed necessary against the real file: alongside ~19
+    small (1-3 second) isolated single-record readings that are
+    immediately corrected by the very next record (e.g. ...4964, 0,
+    4974...), the *terminal* "stream ended" housekeeping records carry a
+    genuinely present-but-meaningless Clock: {"Running": false, "Seconds":
+    0} -- without this guard that resets the carried-forward minute to 0
+    right at the end of the timeline, which made build_snapshot_row()
+    think the timeline never reached *any* snapshot minute and the dataset
+    builder silently produced zero rows. This isn't a guess about Clock's
+    format (Running/Seconds stay exactly as confirmed) -- it's rejecting
+    individual readings that violate the physically-obvious invariant that
+    elapsed match time never goes backwards.
+
     Red-card default rule (explicit, per AGENTS.md): until the first
-    scoreSoccer block appears for a fixture, red_cards_home/away default to
-    0 ("no cards recorded yet"). Once a scoreSoccer block has appeared, its
-    counts are carried forward across any later entries that omit it.
+    non-empty Score block appears for a fixture, red_cards_home/away
+    default to 0 ("no cards recorded yet"). Once a Score block has
+    appeared, its goal/red-card counts are carried forward across any
+    later entries that omit Score (or send it empty ({})) -- a *present*
+    Score block always fully overwrites the running state (see
+    _team_total()).
     """
     timeline: list[TimelineEntry] = []
     last_home_goals = last_away_goals = 0
     last_home_reds = last_away_reds = 0
-    seen_score_block = False
+    last_clock_seconds: Optional[int] = None
+    seen_score = False
 
     for entry in raw_entries:
-        minute = infer_seconds_since_start(entry) / 60.0
-        participant1_is_home = bool(entry["participant1IsHome"])
-        score_soccer = entry.get("scoreSoccer")
+        if entry["Ts"] < entry["StartTime"]:
+            continue  # pre-kickoff -- ignored per AGENTS.md requirement 4
 
-        if score_soccer:
-            seen_score_block = True
-            p1 = score_soccer.get("Participant1")
-            p2 = score_soccer.get("Participant2")
-            home_block, away_block = (p1, p2) if participant1_is_home else (p2, p1)
-            last_home_goals = _sum_period_field(home_block, "Goals")
-            last_away_goals = _sum_period_field(away_block, "Goals")
-            last_home_reds = _sum_period_field(home_block, "RedCards")
-            last_away_reds = _sum_period_field(away_block, "RedCards")
+        clock = entry.get("Clock")
+        if clock:
+            seconds = clock.get("Seconds", 0)
+            if last_clock_seconds is None or seconds >= last_clock_seconds:
+                last_clock_seconds = seconds
+            # else: implausible decrease -- ignored, see the monotonicity
+            # guard note above.
+        minute = (last_clock_seconds or 0) / 60.0
+
+        participant1_is_home = bool(entry["Participant1IsHome"])
+        score = entry.get("Score")
+
+        if score:
+            seen_score = True
+            home_key, away_key = ("Participant1", "Participant2") if participant1_is_home else ("Participant2", "Participant1")
+            last_home_goals = _team_total(score, home_key, "Goals")
+            last_away_goals = _team_total(score, away_key, "Goals")
+            last_home_reds = _team_total(score, home_key, "RedCards")
+            last_away_reds = _team_total(score, away_key, "RedCards")
 
         timeline.append(
             TimelineEntry(
                 minute=minute,
                 home_goals=last_home_goals,
                 away_goals=last_away_goals,
-                home_reds=last_home_reds if seen_score_block else 0,
-                away_reds=last_away_reds if seen_score_block else 0,
-                has_score_block=seen_score_block,
+                home_reds=last_home_reds if seen_score else 0,
+                away_reds=last_away_reds if seen_score else 0,
+                has_score=seen_score,
             )
         )
     return timeline
@@ -265,11 +320,11 @@ def build_snapshot_row(
 
 def build_fixture_rows(fixture_id: int, raw_entries: list[dict]) -> tuple[list[dict], bool]:
     """Returns (rows, red_cards_available). red_cards_available is False if
-    scoreSoccer never appeared for this fixture (all red-card values were
+    no Score block ever appeared for this fixture (all red-card values were
     the documented 0 default, not observed data)."""
     timeline = reconstruct_timeline(raw_entries)
     goal_events = derive_goal_event_minutes(timeline)
-    red_cards_available = any(t.has_score_block for t in timeline)
+    red_cards_available = any(t.has_score for t in timeline)
 
     rows = []
     for minute in SNAPSHOT_MINUTES:
@@ -364,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
         f"Fixtures skipped: {len(fixtures_skipped)}",
         *[f"  - fixture {fid}: {reason}" for fid, reason in fixtures_skipped],
         f"Snapshot rows written: {len(all_rows)}",
-        f"Fixtures with no scoreSoccer data at all (red cards defaulted to 0 for every row): {fixtures_missing_red_cards}",
+        f"Fixtures with no Score data at all (red cards defaulted to 0 for every row): {fixtures_missing_red_cards}",
         f"Output: {args.out_csv}",
     ]
     report_text = "\n".join(report_lines)
@@ -376,86 +431,170 @@ def main(argv: list[str] | None = None) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Self-test (synthetic in-memory fixtures only -- never written to disk,
-# never treated as real match data)
+# Self-test (synthetic in-memory fixtures only -- never written to
+# ml/data/raw or ml/data/processed, never treated as real match data)
 # ---------------------------------------------------------------------------
 
 
-def _synthetic_entry(seq, ts_seconds, start_seconds, p1_home, goals1=0, goals2=0, reds1=0, reds2=0, with_score=True):
-    entry = {
-        "fixtureId": 999999,
-        "gameState": "InProgress",
-        "startTime": start_seconds,
-        "participant1IsHome": p1_home,
-        "ts": ts_seconds,
-        "seq": seq,
+def _score_block(p1_goals=None, p2_goals=None, p1_reds=None, p2_reds=None) -> dict:
+    """Build a Score block using the confirmed nested
+    Participant{1,2}.Total.{Goals,RedCards} shape. A None argument omits
+    that field entirely, matching the real sparse feed's convention that an
+    omitted numeric field within a *present* Total block means zero."""
+
+    def total(goals, reds):
+        d = {}
+        if goals is not None:
+            d["Goals"] = goals
+        if reds is not None:
+            d["RedCards"] = reds
+        return d
+
+    return {
+        "Participant1": {"Total": total(p1_goals, p1_reds)},
+        "Participant2": {"Total": total(p2_goals, p2_reds)},
     }
-    if with_score:
-        entry["scoreSoccer"] = {
-            "Participant1": {"H1": {"Goals": goals1, "YellowCards": 0, "RedCards": reds1, "Corners": 0}},
-            "Participant2": {"H1": {"Goals": goals2, "YellowCards": 0, "RedCards": reds2, "Corners": 0}},
-        }
+
+
+def _synthetic_entry(seq, ts_ms, start_ms, p1_home, clock_seconds=None, score=None, game_state="scheduled"):
+    entry = {
+        "FixtureId": 999999,
+        "GameState": game_state,  # deliberately unreliable/misleading, like the real Devnet data -- see requirement 8/9 tests
+        "StartTime": start_ms,
+        "Participant1IsHome": p1_home,
+        "Ts": ts_ms,
+        "Seq": seq,
+    }
+    if clock_seconds is not None:
+        entry["Clock"] = {"Running": True, "Seconds": clock_seconds}
+    if score is not None:
+        entry["Score"] = score
     return entry
 
 
 def _run_self_tests() -> int:
-    start = 1_000_000
+    import tempfile
 
-    # Kickoff, no score yet.
-    e0 = _synthetic_entry(1, start, start, p1_home=True, with_score=False)
-    # Minute 10: home scores.
-    e1 = _synthetic_entry(2, start + 10 * 60, start, p1_home=True, goals1=1, goals2=0)
-    # Minute 40: away red card, score unchanged.
-    e2 = _synthetic_entry(3, start + 40 * 60, start, p1_home=True, goals1=1, goals2=0, reds2=1)
-    # Minute 65: away equalizes.
-    e3 = _synthetic_entry(4, start + 65 * 60, start, p1_home=True, goals1=1, goals2=1, reds2=1)
-    # Minute 93: full-time status update, no further goals -- realistic
-    # TxLINE data includes status transitions (H2 -> END) even without a
-    # score change, so a finished fixture's timeline extends to ~FT, not
-    # just to the last goal.
-    e4 = _synthetic_entry(5, start + 93 * 60, start, p1_home=True, goals1=1, goals2=1, reds2=1)
+    start_ms = 1_700_000_000_000  # arbitrary but realistic 13-digit ms epoch
 
-    raw_entries = [e0, e1, e2, e3, e4]
+    # -- 1. PascalCase SSE records: load_raw_scores() validates/loads the
+    # confirmed real field casing and sorts chronologically by (Ts, Seq). --
+    sample_entries = [
+        _synthetic_entry(2, start_ms + 100_000, start_ms, True, clock_seconds=10),
+        _synthetic_entry(1, start_ms + 50_000, start_ms, True, clock_seconds=5),
+    ]
+    tmp_root = Path(tempfile.mkdtemp())
+    good_dir = tmp_root / "999999"
+    good_dir.mkdir()
+    (good_dir / "scores_historical.json").write_text(json.dumps(sample_entries))
+    loaded = load_raw_scores(good_dir)
+    assert [e["Seq"] for e in loaded] == [1, 2], loaded  # sorted by Ts primary, not input order
+
+    # A legacy lowercase-keyed entry (the old, incorrect assumed schema)
+    # must be rejected -- proves this module now validates for the
+    # confirmed real PascalCase field names, not the old ones.
+    bad_dir = tmp_root / "888888"
+    bad_dir.mkdir()
+    (bad_dir / "scores_historical.json").write_text(
+        json.dumps([{"fixtureId": 1, "ts": 1, "startTime": 1, "participant1IsHome": True, "seq": 1}])
+    )
+    try:
+        load_raw_scores(bad_dir)
+        raise AssertionError("load_raw_scores should reject legacy lowercase-keyed entries")
+    except DatasetBuildError:
+        pass
+
+    # -- 2. Nested Score.Participant1/Participant2.Total values + red-card
+    # extraction, directly. --
+    score = _score_block(p1_goals=2, p2_goals=1, p2_reds=1)
+    assert _team_total(score, "Participant1", "Goals") == 2
+    assert _team_total(score, "Participant2", "Goals") == 1
+    assert _team_total(score, "Participant1", "RedCards") == 0  # omitted within a present Total -> 0, not carried
+    assert _team_total(score, "Participant2", "RedCards") == 1
+    assert _team_total(None, "Participant1", "Goals") == 0
+    assert _team_total({}, "Participant1", "Goals") == 0
+
+    # -- Full fixture timeline, exercising the remaining requirements
+    # together: pre-kickoff ignored, sparse Score carrying forward, score
+    # increases -> goal events, red-card extraction, unreliable GameState
+    # ignored, fixed snapshots, leakage-safe labels. --
+
+    # Pre-kickoff (1 hour before StartTime) -- must be ignored entirely.
+    e_pre = _synthetic_entry(0, start_ms - 3600_000, start_ms, p1_home=True, clock_seconds=9999, score=_score_block(p1_goals=5))
+
+    # Kickoff (minute 0): Clock confirmed, explicit 0-0 Score.
+    e0 = _synthetic_entry(1, start_ms + 1_000, start_ms, p1_home=True, clock_seconds=0, score=_score_block(p1_goals=0, p2_goals=0))
+    # Minute 10 (600s): home scores -> 1-0.
+    e1 = _synthetic_entry(2, start_ms + 600_000, start_ms, p1_home=True, clock_seconds=600, score=_score_block(p1_goals=1, p2_goals=0))
+    # Minute 25 (1500s): sparse update -- Clock present, but Score entirely
+    # omitted (the common case in the real feed) -- score must carry
+    # forward as 1-0, not reset/vanish.
+    e_sparse = _synthetic_entry(3, start_ms + 1_500_000, start_ms, p1_home=True, clock_seconds=1500, score=None)
+    # Minute 40 (2400s): away red card, score still 1-0.
+    e2 = _synthetic_entry(4, start_ms + 2_400_000, start_ms, p1_home=True, clock_seconds=2400, score=_score_block(p1_goals=1, p2_goals=0, p2_reds=1))
+    # Minute 65 (3900s): away equalizes -> 1-1.
+    e3 = _synthetic_entry(5, start_ms + 3_900_000, start_ms, p1_home=True, clock_seconds=3900, score=_score_block(p1_goals=1, p2_goals=1, p2_reds=1))
+    # Minute 93 (5580s): full-time-ish clock update, Score omitted again --
+    # must carry forward 1-1 / reds (0, 1), not reset to 0.
+    e4 = _synthetic_entry(6, start_ms + 5_580_000, start_ms, p1_home=True, clock_seconds=5580, score=None)
+
+    raw_entries = [e_pre, e0, e1, e_sparse, e2, e3, e4]
 
     timeline = reconstruct_timeline(raw_entries)
-    assert abs(timeline[0].minute - 0) < 1e-6, timeline[0].minute
+    # 3. Pre-kickoff records ignored: 7 raw entries in, only 6 timeline
+    # entries out, and the first one is kickoff (minute 0), not e_pre.
+    assert len(timeline) == 6, len(timeline)
+    assert abs(timeline[0].minute - 0) < 1e-9, timeline[0].minute
+    assert timeline[0].home_goals == 0 and timeline[0].away_goals == 0
     assert abs(timeline[-1].minute - 93) < 1e-6, timeline[-1].minute
-    assert timeline[0].home_reds == 0 and timeline[0].away_reds == 0, "no score block yet -> defaults to 0"
 
+    # 4. Sparse update (minute 25) carries the score forward, not reset.
+    sparse_state = timeline[2]
+    assert abs(sparse_state.minute - 25) < 1e-6, sparse_state.minute
+    assert sparse_state.home_goals == 1 and sparse_state.away_goals == 0, "sparse update must carry score forward"
+
+    # 5. Score increases create goal events, at the minutes they occurred.
     goal_events = derive_goal_event_minutes(timeline)
     assert goal_events == [10, 65], goal_events
 
-    fixture_id = 999999
-    row15, _ = build_fixture_rows(fixture_id, raw_entries)
-    rows_by_minute = {r["minute"]: r for r in row15}
+    # 6. Red-card extraction: 0 before minute 40, 1 (away) from minute 40 on.
+    assert timeline[0].away_reds == 0
+    assert timeline[3].away_reds == 1, timeline[3].away_reds  # minute-40 entry
+    assert timeline[-1].away_reds == 1, "red card must carry forward through the sparse minute-93 update"
 
+    fixture_id = 999999
+    all_rows, red_cards_available = build_fixture_rows(fixture_id, raw_entries)
+    assert red_cards_available is True
+    rows_by_minute = {r["minute"]: r for r in all_rows}
+
+    # 7. Fixed snapshot generation: exactly SNAPSHOT_MINUTES that the
+    # timeline reaches (all seven here, since the timeline extends to 93).
+    assert sorted(rows_by_minute) == SNAPSHOT_MINUTES, sorted(rows_by_minute)
+
+    # 8. Leakage-safe labels + carried-forward state, at each snapshot.
     r15 = rows_by_minute[15]
     assert r15["current_home_score"] == 1 and r15["current_away_score"] == 0
     assert r15["time_since_last_goal"] == 5, r15["time_since_last_goal"]  # 15 - 10
     assert r15[LABEL_COLUMN] == 0, "a goal (minute 65) occurs after minute 15"
 
     r60 = rows_by_minute[60]
+    assert r60["current_home_score"] == 1 and r60["current_away_score"] == 0
     assert r60["red_cards_away"] == 1, "red card at minute 40 should be visible by minute 60"
     assert r60[LABEL_COLUMN] == 0, "goal at minute 65 is after minute 60"
 
     r70 = rows_by_minute[70]
-    assert r70[LABEL_COLUMN] == 1, "no goals after minute 70 in this synthetic fixture"
+    assert r70["current_home_score"] == 1 and r70["current_away_score"] == 1
+    assert r70[LABEL_COLUMN] == 1, "no goals after minute 70"
     assert r70["is_draw"] == 1
 
     r80 = rows_by_minute[80]
     assert r80["current_home_score"] == 1 and r80["current_away_score"] == 1
     assert r80[LABEL_COLUMN] == 1, "no goals after minute 80 either"
+    assert r80["minute_squared"] == 6400
+    assert r80["total_goals"] == 2
+    assert r80["goal_difference"] == 0
 
-    truncated_entries = raw_entries[:-1]  # drop the FT status update -> timeline stops at minute 65
-    truncated_rows, _ = build_fixture_rows(fixture_id, truncated_entries)
-    truncated_by_minute = {r["minute"]: r for r in truncated_rows}
-    assert 80 not in truncated_by_minute, "timeline stopping at minute 65 must not fabricate a minute-80 row"
-    assert 70 not in truncated_by_minute, "timeline stopping at minute 65 must not fabricate a minute-70 row"
-    assert 60 in truncated_by_minute, "minute 60 is still covered by data up to minute 65"
-
-    all_rows, _ = build_fixture_rows(fixture_id, raw_entries)
     validate_no_leakage(all_rows)  # must not raise
-
     bad_row = dict(all_rows[0])
     bad_row["market_odds"] = 1.5
     try:
@@ -463,6 +602,56 @@ def _run_self_tests() -> int:
         raise AssertionError("validate_no_leakage should have rejected an extra column")
     except DatasetBuildError:
         pass
+
+    # Timeline-truncation guard, unchanged behavior: dropping the final
+    # (minute-93) entry stops the timeline at minute 65, so snapshots past
+    # that must not be fabricated.
+    truncated_entries = [e_pre, e0, e1, e_sparse, e2, e3]
+    truncated_rows, _ = build_fixture_rows(fixture_id, truncated_entries)
+    truncated_by_minute = {r["minute"]: r for r in truncated_rows}
+    assert 80 not in truncated_by_minute
+    assert 70 not in truncated_by_minute
+    assert 60 in truncated_by_minute
+
+    # 9. Unreliable GameState is genuinely never read: rebuild the exact
+    # same fixture with GameState varying nonsensically per record (instead
+    # of uniformly "scheduled") and assert every timeline value is
+    # identical -- if any code path accidentally depended on GameState,
+    # this would diverge.
+    varied_game_states = ["live", "finished", None, "upcoming", "postponed", "scheduled", "unknown"]
+    varied_entries = []
+    for entry, gs in zip(raw_entries, varied_game_states):
+        varied = dict(entry)
+        if gs is None:
+            varied.pop("GameState", None)
+        else:
+            varied["GameState"] = gs
+        varied_entries.append(varied)
+    varied_timeline = reconstruct_timeline(varied_entries)
+    assert len(varied_timeline) == len(timeline)
+    for a, b in zip(timeline, varied_timeline):
+        assert a.minute == b.minute
+        assert a.home_goals == b.home_goals and a.away_goals == b.away_goals
+        assert a.home_reds == b.home_reds and a.away_reds == b.away_reds
+
+    # Clock monotonicity guard, confirmed necessary against the real file
+    # (fixture 18222446): a terminal "stream ended" record carrying Clock:
+    # {"Running": false, "Seconds": 0} must NOT reset the carried-forward
+    # minute back to 0 -- without this guard, build_snapshot_row() sees
+    # timeline[-1].minute == 0 and refuses to build any snapshot at all,
+    # silently producing zero rows for an otherwise complete fixture.
+    # last confirmed value going in is 93 min (5580s, from e4).
+    e_glitch_mid = _synthetic_entry(7, start_ms + 5_820_000, start_ms, p1_home=True, clock_seconds=0)  # isolated mid-stream glitch/drop -- must be rejected
+    e_after_glitch = _synthetic_entry(8, start_ms + 5_880_000, start_ms, p1_home=True, clock_seconds=5940)  # 99 min -- accepted, resumes forward
+    e_terminal_reset = _synthetic_entry(9, start_ms + 5_940_000, start_ms, p1_home=True, clock_seconds=0)  # terminal glitch, never corrected -- must be rejected
+
+    glitchy_entries = raw_entries + [e_glitch_mid, e_after_glitch, e_terminal_reset]
+    glitchy_timeline = reconstruct_timeline(glitchy_entries)
+    assert abs(glitchy_timeline[-3].minute - 93.0) < 1e-6, glitchy_timeline[-3].minute  # mid-stream glitch (0) rejected, carries forward 93
+    assert abs(glitchy_timeline[-2].minute - 99.0) < 1e-6, glitchy_timeline[-2].minute  # 5940/60 accepted -- resumes past the glitch
+    assert abs(glitchy_timeline[-1].minute - 99.0) < 1e-6, glitchy_timeline[-1].minute  # terminal 0-reset rejected, carries forward 99
+    glitchy_rows, _ = build_fixture_rows(fixture_id, glitchy_entries)
+    assert {r["minute"] for r in glitchy_rows} == set(SNAPSHOT_MINUTES), {r["minute"] for r in glitchy_rows}
 
     print("All self-tests passed.")
     return 0
