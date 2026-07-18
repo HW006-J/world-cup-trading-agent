@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --test lib/scanner.test.ts lib/scanner.model.test.ts lib/dataSource.test.ts lib/txline/normalize.test.ts lib/trade.test.ts lib/replay/reducer.test.ts lib/replay/goalHistory.test.ts lib/monitoring/reducer.test.ts lib/monitoring/engine.test.ts lib/monitoring/liveScan.test.ts lib/monitoring/liveScan.model.test.ts lib/monitoring/goalHistoryTracker.test.ts lib/model/nextGoalNoneModel.test.ts lib/model/liveFeatureAdapter.test.ts"
+    "test": "node --test lib/scanner.test.ts lib/scanner.model.test.ts lib/dataSource.test.ts lib/txline/normalize.test.ts lib/txline/marketRestriction.test.ts lib/trade.test.ts lib/monitoring/reducer.test.ts lib/monitoring/engine.test.ts lib/monitoring/liveScan.test.ts lib/monitoring/liveScan.model.test.ts lib/monitoring/goalHistoryTracker.test.ts lib/model/nextGoalNoneModel.test.ts lib/model/liveFeatureAdapter.test.ts lib/historical/reconstructMatch.test.ts lib/realOnly.test.ts"
   },
   "dependencies": {
     "next": "16.2.10",

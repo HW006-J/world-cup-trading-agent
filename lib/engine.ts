@@ -403,8 +403,11 @@ export function computeAnalysis(
   const confidence = Math.round(clamp(confidenceRaw, 10, 95));
   const confidenceLabel: ConfidenceLabel = confidenceLabelFor(confidence);
 
+  // A finished match can never be traded, no matter how large its apparent
+  // edge/confidence -- the engine itself refuses to emit BUY here rather
+  // than relying on every caller to separately police match status.
   const signal: Signal =
-    edgePp >= EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD
+    match.status !== "finished" && edgePp >= EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD
       ? "BUY"
       : "PASS";
 

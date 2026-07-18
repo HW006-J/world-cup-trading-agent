@@ -105,8 +105,12 @@ function buildTrainedModelAnalysis(
   const confidenceRaw = 45 + 35 * dataMaturity + 20 * decisiveness;
   const confidence = Math.round(clamp(confidenceRaw, 10, 95));
   const confidenceLabel = confidenceLabelFor(confidence);
+  // Mirrors lib/engine.ts's own finished-match guard -- a finished match can
+  // never be traded, regardless of edge/confidence or probability source.
   const signal: Signal =
-    edgePp >= EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD ? "BUY" : "PASS";
+    match.status !== "finished" && edgePp >= EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD
+      ? "BUY"
+      : "PASS";
 
   return {
     marketId: "nextGoal",
@@ -199,7 +203,8 @@ export interface ScanResult {
   closest: Opportunity | null;
 }
 
-function compareOpportunities(a: Opportunity, b: Opportunity): number {
+/** Exported so lib/monitoring/liveScan.ts can correctly re-rank opportunities after its trained-model-only actionability gate changes some signals from BUY to PASS, without a second, driftable copy of this ordering. */
+export function compareOpportunities(a: Opportunity, b: Opportunity): number {
   const aQualifies = a.analysis.signal === "BUY";
   const bQualifies = b.analysis.signal === "BUY";
   if (aQualifies !== bQualifies) return aQualifies ? -1 : 1;

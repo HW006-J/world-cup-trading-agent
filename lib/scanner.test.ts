@@ -27,11 +27,41 @@ test("Germany vs Spain reproduces the prepared NO TRADE scenario", () => {
 test("Portugal vs Netherlands reproduces the prepared CLOSED scenario", () => {
   const match = findMatch("por-ned");
   assert.equal(match.status, "finished");
-  // The scan itself may still surface a qualifying opportunity; it is the
-  // application layer's responsibility to block new trades on finished
-  // matches regardless of what the scan finds.
+  // The market is closed once a match is finished: the scan still runs (so
+  // the final probabilities/edge can be displayed for demonstration), but it
+  // must never surface a qualifying opportunity, on any market -- the engine
+  // itself refuses to emit BUY for a finished match, so there's nothing left
+  // for the application layer to separately police here.
   const scan = scanMatch(match, demoProvider, MARKETS);
-  assert.ok(scan.outcomesScanned > 0);
+  assert.ok(scan.outcomesScanned > 0, "the finished match is still scanned for display purposes");
+  assert.equal(scan.best, null, "a finished match must never produce a qualifying (BUY) opportunity");
+  assert.ok(
+    scan.opportunities.every((o) => o.analysis.signal !== "BUY"),
+    "no market/selection on a finished match may carry a BUY signal, even ones with a large apparent edge",
+  );
+});
+
+test("a finished match never produces BUY on any market, even where the raw edge is large", () => {
+  const match = findMatch("por-ned");
+  const scan = scanMatch(match, demoProvider, MARKETS);
+  // por-ned is tuned so several selections (nextGoal/none, matchWinner/home,
+  // overUnder/over) would clear the BUY threshold on raw edge/confidence
+  // alone -- proving the exclusion is real, not vacuous.
+  const wouldHaveQualified = scan.opportunities.filter(
+    (o) => o.analysis.edgePp >= 4 && o.analysis.confidence >= 55,
+  );
+  assert.ok(
+    wouldHaveQualified.length > 0,
+    "expected at least one selection whose raw edge/confidence would otherwise qualify",
+  );
+  assert.ok(wouldHaveQualified.every((o) => o.analysis.signal === "PASS"));
+
+  const marketsSeen = new Set(scan.opportunities.map((o) => o.marketId));
+  assert.deepEqual(
+    [...marketsSeen].sort(),
+    ["matchWinner", "nextGoal", "overUnder"],
+    "the exclusion must apply across every market, not only nextGoal/none",
+  );
 });
 
 test("scanMatch handles zero supported markets cleanly", () => {
