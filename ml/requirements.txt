@@ -1,3 +1,8 @@
-pandas
-scikit-learn
-joblib
+# Optional local environment loading
+python-dotenv>=1.0
+
+# Dataset processing and model training
+pandas>=2.3
+numpy>=2.0
+scikit-learn>=1.6
+joblib>=1.5
