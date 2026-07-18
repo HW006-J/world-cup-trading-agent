@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>GoalEdge</title>
+  <style>
+    :root {
+      --bg:      #0d0f14;
+      --surface: #161b24;
+      --s2:      #1e2533;
+      --border:  #2a3347;
+      --accent:  #00d4ff;
+      --green:   #00e676;
+      --red:     #ff3d57;
+      --text:    #e8eaf0;
+      --muted:   #6b7898;
+      --yellow:  #ffd600;
+      --sol:     #9945ff;
+      --orange:  #ff9500;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg); color: var(--text);
+      font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+      font-size: 13px; height: 100vh;
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+    /* ══════════════════════════
+       TOPBAR — untouched
+    ══════════════════════════ */
+    .topbar {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 0 20px; height: 64px;
+      display: flex; align-items: center; justify-content: space-between;
+      flex-shrink: 0; gap: 16px;
+    }
+    .logo { font-size: 16px; font-weight: 800; color: var(--accent); letter-spacing: -.3px; flex-shrink: 0; }
+    .logo span { color: var(--text); }
+    .score-hero {
+      display: flex; align-items: center;
+      background: var(--s2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 6px 16px; gap: 12px;
+    }
+    .score-team { display: flex; align-items: center; gap: 7px; font-size: 14px; font-weight: 700; }
+    .score-flag { font-size: 20px; }
+    .score-goals {
+      font-size: 28px; font-weight: 900; font-variant-numeric: tabular-nums;
+      color: var(--accent); min-width: 22px; text-align: center;
+    }
+    .score-adj { display: flex; flex-direction: column; gap: 2px; }
+    .adj-btn {
+      width: 16px; height: 14px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 3px; color: var(--muted); font-size: 11px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center; line-height: 1;
+      transition: all .12s; user-select: none;
+    }
+    .adj-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .score-center { text-align: center; padding: 0 8px; }
+    .clock-display { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); line-height: 1; }
+    .clock-sub { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .live-dot {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 10px; font-weight: 700; color: var(--red); letter-spacing: .5px;
+    }
+    .live-dot::before {
+      content: ''; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--red); animation: blink 1.4s infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .market-status { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .mkt-locked {
+      display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted);
+      background: var(--s2); border: 1px solid var(--border); border-radius: 5px; padding: 4px 10px;
+    }
+    .txl-dot {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 10px; color: var(--sol); font-weight: 600;
+    }
+    .txl-dot::before {
+      content: ''; width: 5px; height: 5px; border-radius: 50%;
+      background: var(--sol); animation: blink 1.8s infinite;
+    }
+
+    /* ══════════════════════════
+       MAIN GRID
+    ══════════════════════════ */
+    .main {
+      flex: 1; min-height: 0;
+      display: grid;
+      grid-template-columns: 240px 1fr 280px;
+      gap: 1px; background: var(--border);
+    }
+    .col { background: var(--bg); padding: 16px; overflow-y: auto; }
+
+    .sec-label {
+      font-size: 9px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+      color: var(--muted); border-bottom: 1px solid var(--border);
+      padding-bottom: 6px; margin-bottom: 12px;
+    }
+
+    /* ══════════════════════════
+       SHARED: POOL CARDS
+    ══════════════════════════ */
+    .market-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 12px 14px; margin-bottom: 12px;
+    }
+    .market-card-title {
+      font-size: 11px; font-weight: 700; color: var(--text);
+      margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .txline-pill {
+      font-size: 8px; font-weight: 700; letter-spacing: .5px;
+      background: #9945ff20; color: var(--sol); border: 1px solid #9945ff40;
+      border-radius: 3px; padding: 1px 5px;
+    }
+    .pool-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+    .pool-label { font-size: 11px; color: var(--muted); width: 60px; flex-shrink: 0; }
+    .pool-bar-wrap { flex: 1; height: 6px; background: var(--s2); border-radius: 3px; }
+    .pool-bar { height: 6px; border-radius: 3px; transition: width .5s; }
+    .pool-pct { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; width: 34px; text-align: right; }
+    .pool-amount { font-size: 10px; color: var(--muted); width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+    .pool-total {
+      font-size: 10px; color: var(--muted); text-align: right; margin-top: 6px;
+      padding-top: 6px; border-top: 1px solid var(--border);
+    }
+    .pool-total strong { color: var(--text); font-variant-numeric: tabular-nums; }
+    .implied-note { font-size: 9px; color: var(--muted); margin-top: 3px; }
+
+    /* ══════════════════════════
+       COL 2: TG HERO
+    ══════════════════════════ */
+    .tg-col { display: flex; flex-direction: column; gap: 12px; }
+
+    /* big odds display */
+    .tg-odds-row {
+      display: flex; gap: 8px;
+    }
+    .tg-odds-side {
+      flex: 1; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px 12px; text-align: center;
+      transition: border-color .2s;
+    }
+    .tg-odds-side.over-side  { border-color: #00d4ff30; }
+    .tg-odds-side.under-side { border-color: #ffd60030; }
+    .tg-side-label {
+      font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .tg-side-label.over  { color: var(--accent); }
+    .tg-side-label.under { color: var(--yellow); }
+    .tg-odds-num {
+      font-size: 36px; font-weight: 900; font-variant-numeric: tabular-nums;
+      letter-spacing: -1.5px; line-height: 1;
+    }
+    .tg-odds-num.over  { color: var(--accent); }
+    .tg-odds-num.under { color: var(--yellow); }
+    .tg-odds-arrow { font-size: 10px; margin-left: 3px; }
+    .tg-odds-arrow.up   { color: var(--green); }
+    .tg-odds-arrow.down { color: var(--red); }
+    .tg-odds-line { font-size: 9px; color: var(--muted); margin-top: 3px; }
+
+    /* two-views (same pattern as col 3's Next Goal) */
+    .two-views {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px;
+    }
+    .views-row { display: flex; align-items: stretch; }
+    .view-side { flex: 1; text-align: center; padding: 8px 10px; }
+    .view-side + .view-side { border-left: 1px solid var(--border); }
+    .view-source {
+      font-size: 8px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase;
+      margin-bottom: 6px; display: flex; align-items: center; justify-content: center; gap: 4px;
+    }
+    .view-source .dot { width: 5px; height: 5px; border-radius: 50%; animation: blink 2s infinite; }
+    .view-pct {
+      font-size: 34px; font-weight: 900; font-variant-numeric: tabular-nums;
+      line-height: 1; letter-spacing: -1px;
+    }
+    .view-pct.sol    { color: var(--sol); }
+    .view-pct.accent { color: var(--accent); }
+    .view-sub { font-size: 9px; color: var(--muted); margin-top: 3px; }
+    .gap-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); font-size: 11px;
+    }
+    .gap-label { color: var(--muted); }
+    .gap-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px; }
+    .gap-badge.hot   { background: #ff950018; color: var(--orange); border: 1px solid #ff950035; }
+    .gap-badge.cold  { background: #00d4ff12; color: var(--accent); border: 1px solid #00d4ff25; }
+    .gap-badge.agree { background: #00e67612; color: var(--green);  border: 1px solid #00e67628; }
+
+    /* BET BUTTONS */
+    .bet-ou-row { display: flex; gap: 8px; }
+    .bet-ou-btn {
+      flex: 1; padding: 14px 10px; text-align: center; cursor: pointer;
+      border-radius: 8px; font-size: 14px; font-weight: 800; letter-spacing: .3px;
+      border: 2px solid var(--border); background: var(--s2);
+      color: var(--muted); transition: all .15s; user-select: none;
+    }
+    .bet-ou-btn:hover { transform: translateY(-1px); }
+    .bet-ou-btn.bet-over {
+      border-color: var(--accent); color: var(--accent); background: #00d4ff10;
+    }
+    .bet-ou-btn.bet-over:hover  { background: #00d4ff1e; box-shadow: 0 0 18px #00d4ff25; }
+    .bet-ou-btn.bet-under {
+      border-color: var(--yellow); color: var(--yellow); background: #ffd60010;
+    }
+    .bet-ou-btn.bet-under:hover { background: #ffd6001e; box-shadow: 0 0 18px #ffd60025; }
+    .bet-ou-btn.active-over  { background: #00d4ff22; box-shadow: 0 0 22px #00d4ff35; }
+    .bet-ou-btn.active-under { background: #ffd60022; box-shadow: 0 0 22px #ffd60035; }
+    .bet-ou-sub { font-size: 10px; font-weight: 400; margin-top: 4px; opacity: .7; }
+
+    /* INLINE CALCULATOR (revealed when bet selected) */
+    .calc-section {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px; display: none; flex-direction: column; gap: 10px;
+    }
+    .calc-section.visible { display: flex; }
+    .calc-header {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .calc-title { font-size: 11px; font-weight: 700; }
+    .calc-clear {
+      font-size: 10px; color: var(--muted); cursor: pointer; padding: 2px 6px;
+      border: 1px solid var(--border); border-radius: 4px;
+    }
+    .calc-clear:hover { color: var(--red); border-color: var(--red); }
+
+    .stake-row { display: flex; align-items: center; gap: 10px; }
+    .stake-label { font-size: 11px; color: var(--muted); flex-shrink: 0; }
+    .stake-input-wrap {
+      flex: 1; display: flex; align-items: center;
+      background: var(--s2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 0 10px;
+    }
+    .stake-input-wrap:focus-within { border-color: var(--accent); }
+    .stake-symbol { font-size: 14px; color: var(--muted); margin-right: 4px; }
+    .stake-input {
+      background: transparent; border: none; outline: none;
+      color: var(--text); font-size: 20px; font-weight: 700;
+      width: 100%; font-variant-numeric: tabular-nums; padding: 8px 0;
+    }
+    .quick-stakes { display: flex; gap: 5px; }
+    .qs-btn {
+      flex: 1; padding: 4px; background: var(--s2); border: 1px solid var(--border);
+      border-radius: 4px; color: var(--muted); font-size: 11px; cursor: pointer;
+      text-align: center; transition: all .12s;
+    }
+    .qs-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    .payout-result {
+      background: var(--s2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px; text-align: center; transition: border-color .3s;
+    }
+    .payout-result.has-value { border-color: var(--green); }
+    .payout-sub { font-size: 10px; color: var(--muted); letter-spacing: .8px; text-transform: uppercase; margin-bottom: 5px; }
+    .payout-amount {
+      font-size: 48px; font-weight: 900; font-variant-numeric: tabular-nums;
+      color: var(--green); letter-spacing: -2px; line-height: 1; transition: all .3s;
+    }
+    .payout-amount.zero { color: var(--muted); }
+    .payout-detail {
+      display: flex; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px;
+    }
+    .pd-item { flex: 1; text-align: center; }
+    .pd-item + .pd-item { border-left: 1px solid var(--border); }
+    .pd-label { font-size: 9px; color: var(--muted); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 3px; }
+    .pd-val { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .pd-val.green  { color: var(--green); }
+    .pd-val.yellow { color: var(--yellow); }
+
+    .confirm-btn {
+      width: 100%; padding: 12px; border-radius: 7px; font-size: 14px; font-weight: 800;
+      cursor: pointer; border: none; transition: all .15s; letter-spacing: .3px;
+    }
+    .confirm-btn.over-confirm  { background: var(--accent); color: var(--bg); }
+    .confirm-btn.under-confirm { background: var(--yellow); color: var(--bg); }
+    .confirm-btn:hover { transform: translateY(-1px); opacity: .92; }
+
+    .payout-parimutuel-note {
+      font-size: 9px; color: var(--muted); text-align: center; line-height: 1.5;
+    }
+
+    /* ══════════════════════════
+       COL 3 — untouched styles
+    ══════════════════════════ */
+    .settle-card {
+      background: var(--surface); border: 1px solid var(--sol);
+      border-radius: 8px; padding: 14px;
+    }
+    .settle-step {
+      display: flex; gap: 10px; align-items: flex-start;
+      padding: 6px 0; border-bottom: 1px solid var(--border);
+    }
+    .settle-step:last-child { border-bottom: none; padding-bottom: 0; }
+    .step-num {
+      width: 20px; height: 20px; border-radius: 50%; background: var(--sol); color: #fff;
+      font-size: 10px; font-weight: 700; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .step-text { font-size: 11px; color: var(--muted); line-height: 1.45; padding-top: 2px; }
+    .step-text strong { color: var(--text); }
+    .settle-footer { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .settle-tx-btn {
+      width: 100%; padding: 8px; background: var(--s2); border: 1px solid var(--border);
+      border-radius: 5px; color: var(--muted); font-size: 11px;
+      cursor: not-allowed; text-align: center; margin-bottom: 6px;
+    }
+    .on-chain-note { font-size: 9px; color: var(--muted); text-align: center; line-height: 1.4; }
+    .on-chain-note strong { color: var(--green); }
+
+    /* ══════════════════════════
+       EVENTS STRIP — untouched
+    ══════════════════════════ */
+    .events-strip {
+      flex-shrink: 0; height: 48px;
+      background: var(--surface); border-top: 1px solid var(--border);
+      display: flex; align-items: center; overflow: hidden;
+    }
+    .events-label {
+      padding: 0 12px; font-size: 9px; font-weight: 700; letter-spacing: 1.2px;
+      text-transform: uppercase; color: var(--muted); flex-shrink: 0;
+      border-right: 1px solid var(--border); height: 100%; display: flex; align-items: center;
+    }
+    .events-scroll { flex: 1; overflow: hidden; display: flex; align-items: center; }
+    .events-inner {
+      display: flex; white-space: nowrap;
+      animation: scroll-left 40s linear infinite;
+    }
+    @keyframes scroll-left { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+    .event-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 14px; border-right: 1px solid var(--border);
+      font-size: 12px; white-space: nowrap;
+    }
+    .event-chip .ev-min  { color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; }
+    .event-chip .ev-icon { font-size: 14px; }
+    .event-chip .ev-text { font-weight: 600; }
+    .event-chip.goal   .ev-text { color: var(--green); }
+    .event-chip.yellow .ev-text { color: var(--yellow); }
+    .event-chip.red    .ev-text { color: var(--red); }
+    .event-chip.var    .ev-text { color: var(--accent); }
+    .event-chip.sub    .ev-text { color: var(--muted); }
+
+    /* ══════════════════════════
+       WALLET MODAL
+    ══════════════════════════ */
+    .wallet-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,.65); z-index: 1000;
+      align-items: center; justify-content: center;
+    }
+    .wallet-overlay.open { display: flex; }
+    .wallet-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 14px; padding: 24px; width: 340px;
+      box-shadow: 0 24px 60px rgba(0,0,0,.6);
+    }
+    .wallet-header {
+      display: flex; align-items: center; gap: 10px; margin-bottom: 18px;
+    }
+    .wallet-icon {
+      width: 36px; height: 36px; border-radius: 8px;
+      background: linear-gradient(135deg, #9945ff, #14f195);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; flex-shrink: 0;
+    }
+    .wallet-header-text { font-size: 15px; font-weight: 800; }
+    .wallet-header-sub  { font-size: 10px; color: var(--muted); margin-top: 1px; }
+    .wallet-divider { height: 1px; background: var(--border); margin: 0 -24px 16px; }
+    .wallet-detail-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 12px;
+    }
+    .wallet-detail-row:last-child { border-bottom: none; }
+    .wd-key  { color: var(--muted); }
+    .wd-val  { font-weight: 700; font-variant-numeric: tabular-nums; }
+    .wallet-payout-hero {
+      text-align: center; padding: 14px 0 10px;
+      border-bottom: 1px solid var(--border); margin-bottom: 14px;
+    }
+    .wallet-payout-label { font-size: 10px; color: var(--muted); letter-spacing: .8px; text-transform: uppercase; margin-bottom: 4px; }
+    .wallet-payout-num {
+      font-size: 40px; font-weight: 900; font-variant-numeric: tabular-nums;
+      color: var(--green); letter-spacing: -1.5px; line-height: 1;
+    }
+    .wallet-payout-sub { font-size: 10px; color: var(--muted); margin-top: 3px; }
+    .wallet-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .wallet-cancel {
+      flex: 1; padding: 11px; border-radius: 7px; border: 1px solid var(--border);
+      background: var(--s2); color: var(--muted); font-size: 13px; font-weight: 700;
+      cursor: pointer; text-align: center; transition: all .12s;
+    }
+    .wallet-cancel:hover { border-color: var(--red); color: var(--red); }
+    .wallet-approve {
+      flex: 2; padding: 11px; border-radius: 7px; border: none;
+      font-size: 13px; font-weight: 800; cursor: pointer; text-align: center;
+      transition: all .12s;
+    }
+    .wallet-approve.over-approve   { background: var(--accent); color: var(--bg); }
+    .wallet-approve.under-approve  { background: var(--yellow); color: var(--bg); }
+    .wallet-approve:hover { opacity: .88; transform: translateY(-1px); }
+    .wallet-chain-note {
+      font-size: 9px; color: var(--muted); text-align: center; margin-top: 10px; line-height: 1.5;
+    }
+
+    /* success toast */
+    .toast {
+      position: fixed; bottom: 60px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: var(--green); color: var(--bg); padding: 10px 20px;
+      border-radius: 8px; font-size: 13px; font-weight: 700;
+      opacity: 0; transition: all .3s; z-index: 2000; pointer-events: none;
+    }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     TOPBAR — untouched
+══════════════════════════════════════════ -->
+<div class="topbar">
+  <div class="logo">Goal<span>Edge</span></div>
+
+  <div class="score-hero">
+    <div class="score-team">
+      <span class="score-flag">🇫🇷</span>
+      <span>France</span>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px;margin-left:8px">
+      <div class="score-adj">
+        <div class="adj-btn" onclick="changeGoals('bra',1)">+</div>
+        <div class="adj-btn" onclick="changeGoals('bra',-1)">−</div>
+      </div>
+      <span class="score-goals" id="bra-score">0</span>
+    </div>
+    <div class="score-center" style="margin:0 10px">
+      <div class="clock-display" id="clock">--</div>
+      <div class="clock-sub" id="half-label">Pre-Match</div>
+      <div class="live-dot">LIVE</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px;margin-right:8px">
+      <span class="score-goals" id="ger-score">0</span>
+      <div class="score-adj">
+        <div class="adj-btn" onclick="changeGoals('ger',1)">+</div>
+        <div class="adj-btn" onclick="changeGoals('ger',-1)">−</div>
+      </div>
+    </div>
+    <div class="score-team">
+      <span>England</span>
+      <span class="score-flag">🏴󠁧󠁢󠁥󠁮󠁧󠁿</span>
+    </div>
+  </div>
+
+  <div class="market-status">
+    <div class="mkt-locked" style="border-color:#00e67640;color:var(--green)">🟢 Live betting open</div>
+    <div class="txl-dot" style="justify-content:flex-end">TxLine On-Chain Feed</div>
+    <div id="backend-status" style="font-size:9px;color:var(--muted);text-align:right;margin-top:2px">⏳ connecting…</div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     MAIN
+══════════════════════════════════════════ -->
+<div class="main">
+
+  <!-- ── COL 1: MATCH WINNER (secondary) ── -->
+  <div class="col">
+    <div class="sec-label">Match Winner</div>
+
+    <div class="market-card" style="margin-bottom:0">
+      <div class="market-card-title">
+        Match Winner
+        <span class="txline-pill">TXLINE</span>
+      </div>
+      <div class="pool-row">
+        <span class="pool-label">🇫🇷 France</span>
+        <div class="pool-bar-wrap"><div class="pool-bar" id="bar-bra" style="background:var(--green)"></div></div>
+        <span class="pool-pct" id="pct-bra" style="color:var(--green)">--</span>
+        <span class="pool-amount" id="amt-bra">--</span>
+      </div>
+      <div class="pool-row">
+        <span class="pool-label">Draw</span>
+        <div class="pool-bar-wrap"><div class="pool-bar" id="bar-draw" style="background:var(--muted)"></div></div>
+        <span class="pool-pct" id="pct-draw" style="color:var(--muted)">--</span>
+        <span class="pool-amount" id="amt-draw">--</span>
+      </div>
+      <div class="pool-row">
+        <span class="pool-label">🏴󠁧󠁢󠁥󠁮󠁧󠁿 England</span>
+        <div class="pool-bar-wrap"><div class="pool-bar" id="bar-ger" style="background:var(--red)"></div></div>
+        <span class="pool-pct" id="pct-ger" style="color:var(--red)">--</span>
+        <span class="pool-amount" id="amt-ger">--</span>
+      </div>
+      <div class="pool-total">Pool: <strong id="pool-mw-total">--</strong></div>
+      <div class="implied-note">% = share of pool · implies payout odds</div>
+      <div id="crowd-mw" style="font-size:10px;color:var(--muted);margin-top:8px;font-style:italic;line-height:1.4"></div>
+    </div>
+  </div>
+
+  <!-- ── COL 2: TOTAL GOALS HERO ── -->
+  <div class="col tg-col">
+
+    <!-- header -->
+    <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border)">
+      <div>
+        <div style="font-size:17px;font-weight:800;letter-spacing:-.3px">Total Goals O/U 2.5</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px">Live TxLine market · updates every ~2s</div>
+      </div>
+      <span class="txline-pill" style="font-size:9px;padding:2px 7px">TXLINE</span>
+    </div>
+
+    <!-- O/U pool bars -->
+    <div class="market-card" style="margin-bottom:0;padding:10px 12px">
+      <div class="pool-row" style="margin-bottom:5px">
+        <span class="pool-label">Over 2.5</span>
+        <div class="pool-bar-wrap"><div class="pool-bar" id="bar-over" style="background:var(--accent)"></div></div>
+        <span class="pool-pct" id="pct-over" style="color:var(--accent)">--</span>
+        <span class="pool-amount" id="amt-over">--</span>
+      </div>
+      <div class="pool-row" style="margin-bottom:0">
+        <span class="pool-label">Under 2.5</span>
+        <div class="pool-bar-wrap"><div class="pool-bar" id="bar-under" style="background:var(--yellow)"></div></div>
+        <span class="pool-pct" id="pct-under" style="color:var(--yellow)">--</span>
+        <span class="pool-amount" id="amt-under">--</span>
+      </div>
+      <div class="pool-total">Pool: <strong id="pool-tg-total">--</strong></div>
+      <div id="crowd-tg" style="font-size:10px;color:var(--muted);margin-top:6px;font-style:italic;line-height:1.4"></div>
+    </div>
+
+    <!-- TWO-VIEWS: same pattern as Next Goal col -->
+    <div class="sec-label">Total Goals — Two Views</div>
+    <div class="two-views" style="margin-bottom:0">
+      <div class="views-row">
+        <div class="view-side">
+          <div class="view-source" style="color:var(--sol)">
+            <div class="dot" style="background:var(--sol)"></div>
+            TxLine Market
+          </div>
+          <div class="view-pct sol" id="tg-txline-pct">--</div>
+          <div class="view-sub">from live pool split</div>
+        </div>
+        <div class="view-side">
+          <div class="view-source" style="color:var(--accent)">
+            <div class="dot" style="background:var(--accent)"></div>
+            Our Model
+          </div>
+          <div class="view-pct accent" id="tg-model-pct">--</div>
+          <div class="view-sub" id="tg-model-sub">pace + pregame</div>
+        </div>
+      </div>
+      <div class="gap-row">
+        <span class="gap-label">Gap</span>
+        <span class="gap-badge agree" id="tg-gap-badge">Calculating…</span>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px;line-height:1.5;border-top:1px solid var(--border);padding-top:8px" id="tg-gap-narrative">—</div>
+      <div id="tg-disagreements"></div>
+    </div>
+
+    <!-- BET BUTTONS -->
+    <div class="bet-ou-row">
+      <div class="bet-ou-btn" id="btn-over" onclick="selectOU('over')">
+        ⬆ Bet Over 2.5
+        <div class="bet-ou-sub" id="btn-over-odds">--</div>
+      </div>
+      <div class="bet-ou-btn" id="btn-under" onclick="selectOU('under')">
+        ⬇ Bet Under 2.5
+        <div class="bet-ou-sub" id="btn-under-odds">--</div>
+      </div>
+    </div>
+
+    <!-- INLINE CALCULATOR (shown when bet selected) -->
+    <div class="calc-section" id="calc-section">
+      <div class="calc-header">
+        <div class="calc-title" id="calc-title">Betting: Over 2.5</div>
+        <div class="calc-clear" onclick="clearOU()">✕ clear</div>
+      </div>
+
+      <div class="stake-row">
+        <span class="stake-label">Stake</span>
+        <div class="stake-input-wrap">
+          <span class="stake-symbol">$</span>
+          <input class="stake-input" type="number" id="stake" value="10" min="1" oninput="renderPayout()"/>
+        </div>
+      </div>
+
+      <div class="quick-stakes">
+        <div class="qs-btn" onclick="setStake(5)">$5</div>
+        <div class="qs-btn" onclick="setStake(10)">$10</div>
+        <div class="qs-btn" onclick="setStake(25)">$25</div>
+        <div class="qs-btn" onclick="setStake(50)">$50</div>
+        <div class="qs-btn" onclick="setStake(100)">$100</div>
+      </div>
+
+      <div class="payout-result" id="payout-result">
+        <div class="payout-sub">Estimated payout if your pick wins</div>
+        <div class="payout-amount zero" id="payout-amount">$--</div>
+        <div class="payout-detail">
+          <div class="pd-item">
+            <div class="pd-label">Profit</div>
+            <div class="pd-val green" id="pd-profit">--</div>
+          </div>
+          <div class="pd-item">
+            <div class="pd-label">Effective Odds</div>
+            <div class="pd-val yellow" id="pd-odds">--</div>
+          </div>
+          <div class="pd-item">
+            <div class="pd-label">Pool Share</div>
+            <div class="pd-val" id="pd-share" style="color:var(--text)">--</div>
+          </div>
+        </div>
+      </div>
+
+      <button class="confirm-btn" id="confirm-btn" onclick="openWalletModal()">
+        Confirm Bet →
+      </button>
+
+      <div class="payout-parimutuel-note">
+        Parimutuel: est. odds based on current pool · finalise at market close
+      </div>
+    </div>
+
+  </div><!-- end tg-col -->
+
+  <!-- ── COL 3: NEXT GOAL + SETTLE — untouched HTML ── -->
+  <div class="col">
+
+    <div class="sec-label">Next Goal Probability</div>
+    <div class="two-views">
+      <div style="font-size:10px;color:var(--accent);font-weight:600;letter-spacing:.5px;margin-bottom:6px">PACE MODEL</div>
+      <div class="view-pct accent" id="ng-model">--</div>
+      <div class="view-sub" id="ng-model-sub" style="margin-top:4px">--</div>
+      <div style="font-size:10px;color:var(--muted);margin-top:10px;line-height:1.5;border-top:1px solid var(--border);padding-top:8px" id="gap-narrative">—</div>
+      <div id="ng-resolution"></div>
+    </div>
+
+    <div class="sec-label" style="margin-top:14px">How This Settles</div>
+    <div class="settle-card">
+      <div class="settle-step">
+        <div class="step-num">1</div>
+        <div class="step-text">Match ends — final score recorded by TxLine's live feed</div>
+      </div>
+      <div class="settle-step">
+        <div class="step-num">2</div>
+        <div class="step-text"><strong>TxLine publishes the result on-chain</strong> via Merkle proof to the Solana blockchain</div>
+      </div>
+      <div class="settle-step">
+        <div class="step-num">3</div>
+        <div class="step-text">Our smart contract reads the <strong>verified on-chain proof</strong> — no admin involved</div>
+      </div>
+      <div class="settle-step">
+        <div class="step-num">4</div>
+        <div class="step-text"><strong>Winning pool splits automatically</strong> to winners' wallets — nobody can change the result</div>
+      </div>
+      <div class="settle-footer">
+        <div class="settle-tx-btn">🔗 Settlement tx — available after match</div>
+        <div class="on-chain-note">
+          Settlement is <strong>trustless and immutable</strong>.
+          Once the Solana proof is published, no party can alter the outcome.
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end .main -->
+
+<!-- ── EVENTS STRIP — untouched ── -->
+<div class="events-strip">
+  <div class="events-label">Match Events</div>
+  <div class="events-scroll">
+    <div class="events-inner" id="events-inner"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     WALLET APPROVAL MODAL
+══════════════════════════════════════════ -->
+<div class="wallet-overlay" id="wallet-overlay">
+  <div class="wallet-card">
+    <div class="wallet-header">
+      <div class="wallet-icon">◎</div>
+      <div>
+        <div class="wallet-header-text">Confirm Transaction</div>
+        <div class="wallet-header-sub">Solana · GoalEdge Market</div>
+      </div>
+    </div>
+    <div class="wallet-divider"></div>
+
+    <div class="wallet-payout-hero">
+      <div class="wallet-payout-label">Estimated Payout if Correct</div>
+      <div class="wallet-payout-num" id="modal-payout">$--</div>
+      <div class="wallet-payout-sub" id="modal-profit">--</div>
+    </div>
+
+    <div class="wallet-detail-row">
+      <span class="wd-key">Market</span>
+      <span class="wd-val">Total Goals O/U 2.5</span>
+    </div>
+    <div class="wallet-detail-row">
+      <span class="wd-key">Selection</span>
+      <span class="wd-val" id="modal-selection">Over 2.5</span>
+    </div>
+    <div class="wallet-detail-row">
+      <span class="wd-key">Stake</span>
+      <span class="wd-val" id="modal-stake">$10.00</span>
+    </div>
+    <div class="wallet-detail-row">
+      <span class="wd-key">Effective Odds</span>
+      <span class="wd-val" id="modal-odds">--</span>
+    </div>
+    <div class="wallet-detail-row">
+      <span class="wd-key">Settlement</span>
+      <span class="wd-val" style="color:var(--sol)">TxLine On-Chain Oracle</span>
+    </div>
+
+    <div class="wallet-actions">
+      <div class="wallet-cancel" onclick="closeWalletModal()">Cancel</div>
+      <button class="wallet-approve" id="wallet-approve-btn" onclick="approveWallet()">
+        Approve
+      </button>
+    </div>
+    <div class="wallet-chain-note">
+      This transaction settles automatically via Solana smart contract.<br>No admin can alter the result.
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast">✓ Transaction submitted to Solana</div>
+
+<script>
+  // ═══════════ STATE ═══════════
+  let braGoals = 0, gerGoals = 0;
+  let matchMinute = 0;
+  let matchIsLive = false; // true once backend confirms match has started
+  let selectedOU = null; // 'over' | 'under' | null
+
+  // parimutuel pools
+  const pool = {
+    mw: { bra: 4200, draw: 1800, ger: 1100 },
+    tg: { over: 2800, under: 3900 }
+  };
+
+  // TxLine live odds state
+  let txOverOdds  = 2.20;
+  let txUnderOdds = 1.65;
+  let txOverDir   = 0;
+  let txUnderDir  = 0;
+
+  // next-goal two-views state (col 3)
+  // modelNextGoalPct is now computed from match state — see computeNGModelPct()
+
+  // resolution mechanic + crowd state
+  let ngWindow = null; // { startMin, lastGoals, txPct, modPct }
+  let ngResolution = null; // { winner, min, goalScored, modPct, txPct }
+  let tgDisagreements = []; // [{ min, txPct, modPct, gapPp }, ...]
+
+  // ═══════════ MATCH EVENTS ═══════════
+  const EVENTS = [
+    { min:  4, type: 'sub',    icon: '🔄', text: 'Substitution — England' },
+    { min:  8, type: 'yellow', icon: '🟨', text: 'Yellow Card — England' },
+    { min: 19, type: 'var',    icon: '📺', text: 'VAR Review — Offside' },
+    { min: 23, type: 'goal',   icon: '⚽', text: 'GOAL! — France' },
+    { min: 31, type: 'yellow', icon: '🟨', text: 'Yellow Card — France' },
+    { min: 38, type: 'sub',    icon: '🔄', text: 'Substitution — France' },
+    { min: 44, type: 'var',    icon: '📺', text: 'VAR Review — Handball' },
+    { min: 45, type: 'sub',    icon: '🔄', text: 'Substitution — England' },
+    { min: 52, type: 'yellow', icon: '🟨', text: 'Yellow Card — England' },
+    { min: 61, type: 'sub',    icon: '🔄', text: 'Substitution — France' },
+    { min: 67, type: 'var',    icon: '📺', text: 'Shot saved — England' },
+  ];
+
+  function buildEventTicker() {
+    if (!matchIsLive) {
+      document.getElementById('events-inner').innerHTML =
+        '<div class="event-chip var" style="opacity:.5">⏳ Awaiting kickoff — live events will appear here</div>';
+      return;
+    }
+    const chips = EVENTS.filter(e => e.min <= matchMinute).map(e =>
+      `<div class="event-chip ${e.type}">
+        <span class="ev-min">${e.min}'</span>
+        <span class="ev-icon">${e.icon}</span>
+        <span class="ev-text">${e.text}</span>
+      </div>`
+    ).join('');
+    document.getElementById('events-inner').innerHTML = chips + chips;
+  }
+
+  // ═══════════ SCORE CONTROLS ═══════════
+  function changeGoals(team, delta) {
+    if (team === 'bra') braGoals = Math.max(0, braGoals + delta);
+    else                gerGoals = Math.max(0, gerGoals + delta);
+    document.getElementById('bra-score').textContent = braGoals;
+    document.getElementById('ger-score').textContent = gerGoals;
+    const total = braGoals + gerGoals;
+    if (total >= 3) {
+      pool.tg.over  = Math.round(pool.tg.over  * 1.12);
+      pool.tg.under = Math.round(pool.tg.under * 0.88);
+      txOverOdds  = Math.max(1.10, txOverOdds  - 0.18);
+      txUnderOdds = Math.min(5.00, txUnderOdds + 0.35);
+    } else if (total === 0) {
+      txOverOdds  = Math.min(3.50, txOverOdds  + 0.20);
+      txUnderOdds = Math.max(1.20, txUnderOdds - 0.15);
+    }
+    renderAll();
+  }
+
+  // ═══════════ OU BET SELECTION ═══════════
+  function selectOU(side) {
+    selectedOU = side;
+    const btnOver  = document.getElementById('btn-over');
+    const btnUnder = document.getElementById('btn-under');
+    btnOver.className  = 'bet-ou-btn bet-over'  + (side === 'over'  ? ' active-over'  : '');
+    btnUnder.className = 'bet-ou-btn bet-under' + (side === 'under' ? ' active-under' : '');
+    // reveal calculator
+    document.getElementById('calc-section').classList.add('visible');
+    document.getElementById('calc-title').textContent = 'Betting: ' + (side === 'over' ? 'Over 2.5' : 'Under 2.5');
+    const confirmBtn = document.getElementById('confirm-btn');
+    confirmBtn.className = 'confirm-btn ' + (side === 'over' ? 'over-confirm' : 'under-confirm');
+    confirmBtn.textContent = side === 'over' ? 'Confirm — Bet Over 2.5 →' : 'Confirm — Bet Under 2.5 →';
+    renderPayout();
+  }
+
+  function clearOU() {
+    selectedOU = null;
+    document.getElementById('btn-over').className  = 'bet-ou-btn bet-over';
+    document.getElementById('btn-under').className = 'bet-ou-btn bet-under';
+    document.getElementById('calc-section').classList.remove('visible');
+  }
+
+  function setStake(v) {
+    document.getElementById('stake').value = v;
+    renderPayout();
+  }
+
+  // ═══════════ PAYOUT CALC ═══════════
+  function calcPayout(sel, stake) {
+    const poolBefore = pool.tg.over + pool.tg.under;
+    const selBefore  = pool.tg[sel];
+    const poolAfter  = poolBefore + stake;
+    const selAfter   = selBefore  + stake;
+    return {
+      payout:     (poolAfter / selAfter) * stake,
+      odds:       poolAfter / selAfter,
+      profit:     (poolAfter / selAfter) * stake - stake,
+      sharePct:   (stake / selAfter * 100),
+      poolBefore, poolAfter
+    };
+  }
+
+  function renderPayout() {
+    if (!selectedOU) return;
+    const stake = parseFloat(document.getElementById('stake').value) || 0;
+    if (stake <= 0) {
+      document.getElementById('payout-amount').textContent = '$--';
+      document.getElementById('payout-amount').className   = 'payout-amount zero';
+      document.getElementById('pd-profit').textContent = '--';
+      document.getElementById('pd-odds').textContent   = '--';
+      document.getElementById('pd-share').textContent  = '--';
+      return;
+    }
+    const r = calcPayout(selectedOU, stake);
+    document.getElementById('payout-result').classList.add('has-value');
+    document.getElementById('payout-amount').textContent = '$' + r.payout.toFixed(2);
+    document.getElementById('payout-amount').className   = 'payout-amount';
+    document.getElementById('pd-profit').textContent     = '+$' + r.profit.toFixed(2);
+    document.getElementById('pd-odds').textContent       = r.odds.toFixed(2) + 'x';
+    document.getElementById('pd-share').textContent      = r.sharePct.toFixed(2) + '%';
+  }
+
+  // ═══════════ WALLET MODAL ═══════════
+  function openWalletModal() {
+    if (!selectedOU) return;
+    const stake = parseFloat(document.getElementById('stake').value) || 0;
+    if (stake <= 0) return;
+    const r = calcPayout(selectedOU, stake);
+    document.getElementById('modal-payout').textContent    = '$' + r.payout.toFixed(2);
+    document.getElementById('modal-profit').textContent    = 'Profit: +$' + r.profit.toFixed(2);
+    document.getElementById('modal-selection').textContent = selectedOU === 'over' ? 'Over 2.5 goals' : 'Under 2.5 goals';
+    document.getElementById('modal-stake').textContent     = '$' + stake.toFixed(2);
+    document.getElementById('modal-odds').textContent      = r.odds.toFixed(2) + 'x';
+    const approveBtn = document.getElementById('wallet-approve-btn');
+    approveBtn.className = 'wallet-approve ' + (selectedOU === 'over' ? 'over-approve' : 'under-approve');
+    document.getElementById('wallet-overlay').classList.add('open');
+  }
+
+  function closeWalletModal() {
+    document.getElementById('wallet-overlay').classList.remove('open');
+  }
+
+  function approveWallet() {
+    closeWalletModal();
+    // add stake to pool (simulates the bet landing)
+    const stake = parseFloat(document.getElementById('stake').value) || 0;
+    pool.tg[selectedOU] += stake;
+    showToast('✓ Transaction submitted · ' + (selectedOU === 'over' ? 'Over' : 'Under') + ' 2.5  $' + stake.toFixed(2));
+    clearOU();
+    renderAll();
+  }
+
+  function showToast(msg) {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 3200);
+  }
+
+  // ═══════════ POOLS RENDER ═══════════
+  function renderPools() {
+    // match winner
+    const mwT = pool.mw.bra + pool.mw.draw + pool.mw.ger;
+    const braP = pool.mw.bra/mwT, drawP = pool.mw.draw/mwT, gerP = pool.mw.ger/mwT;
+    document.getElementById('bar-bra').style.width  = (braP*100)+'%';
+    document.getElementById('bar-draw').style.width = (drawP*100)+'%';
+    document.getElementById('bar-ger').style.width  = (gerP*100)+'%';
+    document.getElementById('pct-bra').textContent  = Math.round(braP*100)+'%';
+    document.getElementById('pct-draw').textContent = Math.round(drawP*100)+'%';
+    document.getElementById('pct-ger').textContent  = Math.round(gerP*100)+'%';
+    document.getElementById('amt-bra').textContent  = '$'+pool.mw.bra.toLocaleString();
+    document.getElementById('amt-draw').textContent = '$'+pool.mw.draw.toLocaleString();
+    document.getElementById('amt-ger').textContent  = '$'+pool.mw.ger.toLocaleString();
+    document.getElementById('pool-mw-total').textContent = '$'+mwT.toLocaleString();
+
+    // total goals
+    const tgT  = pool.tg.over + pool.tg.under;
+    const overP = pool.tg.over/tgT, underP = pool.tg.under/tgT;
+    document.getElementById('bar-over').style.width  = (overP*100)+'%';
+    document.getElementById('bar-under').style.width = (underP*100)+'%';
+    document.getElementById('pct-over').textContent  = Math.round(overP*100)+'%';
+    document.getElementById('pct-under').textContent = Math.round(underP*100)+'%';
+    document.getElementById('amt-over').textContent  = '$'+pool.tg.over.toLocaleString();
+    document.getElementById('amt-under').textContent = '$'+pool.tg.under.toLocaleString();
+    document.getElementById('pool-tg-total').textContent = '$'+tgT.toLocaleString();
+
+    // crowd-read captions (Feature 2)
+    const topTeam = braP > gerP && braP > drawP ? 'France' : gerP > braP && gerP > drawP ? 'England' : null;
+    const topTeamPct = topTeam === 'France' ? Math.round(braP*100) : topTeam === 'England' ? Math.round(gerP*100) : null;
+    document.getElementById('crowd-mw').textContent = topTeam
+      ? `${topTeamPct}% of bettors this half are on ${topTeam}`
+      : 'The field is split — no team has majority support';
+    const leadSide = overP >= underP ? 'Over 2.5' : 'Under 2.5';
+    const leadPct  = Math.round(Math.max(overP, underP) * 100);
+    document.getElementById('crowd-tg').textContent = `Our pool: ${leadPct}% on ${leadSide} · TxLine market consensus shown below`;
+  }
+
+  // ═══════════ TXLINE O/U ODDS NUDGE ═══════════
+  function nudgeTxOU() {
+    const oldOver  = txOverOdds;
+    const oldUnder = txUnderOdds;
+    txOverOdds  = Math.max(1.15, Math.min(4.00, txOverOdds  + (Math.random()-0.5)*0.06));
+    txUnderOdds = Math.max(1.10, Math.min(4.00, txUnderOdds + (Math.random()-0.5)*0.05));
+    txOverDir   = txOverOdds  > oldOver  ? 1 : txOverOdds  < oldOver  ? -1 : 0;
+    txUnderDir  = txUnderOdds > oldUnder ? 1 : txUnderOdds < oldUnder ? -1 : 0;
+  }
+
+  function renderTGHero() {
+    // bet button sub-labels
+    document.getElementById('btn-over-odds').textContent  = txOverOdds.toFixed(2)  + 'x odds';
+    document.getElementById('btn-under-odds').textContent = txUnderOdds.toFixed(2) + 'x odds';
+
+    // two-views comparison
+    // TxLine % = vig-adjusted over implied
+    const rawOver  = 1/txOverOdds, rawUnder = 1/txUnderOdds;
+    const vig = rawOver + rawUnder;
+    const txOverPct = rawOver / vig;
+
+    // model: pace-based Poisson P(final total >= 3)
+    // Correct formulation: condition on goals already scored.
+    // P(Over 2.5) = P(future goals >= neededGoals) where future goals ~ Poisson(remainingLambda)
+    const total        = braGoals + gerGoals;
+    const minElapsed   = Math.max(1, matchMinute);
+    const minLeft      = Math.max(0, 90 - minElapsed);
+    const pregameRate  = 2.75 / 90;
+    const obsRate      = total / minElapsed;
+    const blend        = Math.min(1, total * 0.4 + (minElapsed/90) * 0.6);
+    const blendedRate  = blend * obsRate + (1 - blend) * pregameRate;
+    const remainingLambda = blendedRate * minLeft;  // expected goals still to come
+    const projected       = total + remainingLambda; // expected final total (display only)
+    const neededGoals     = Math.max(0, 3 - total);  // how many more goals needed for Over
+    const modelOverPct    = poissonAtLeast(remainingLambda, neededGoals);
+
+    const txPctRounded  = Math.round(txOverPct  * 100);
+    const modPctRounded = Math.round(modelOverPct * 100);
+    const gapPp  = modPctRounded - txPctRounded;
+    const absGap = Math.abs(gapPp);
+
+    document.getElementById('tg-txline-pct').textContent = txPctRounded + '%';
+    document.getElementById('tg-model-pct').textContent  = modPctRounded + '%';
+    const subLabel = total >= 3
+      ? 'already over 2.5 ✓'
+      : `proj. ${projected.toFixed(1)} final · needs ${neededGoals} more`;
+    document.getElementById('tg-model-sub').textContent = subLabel;
+
+    const badge = document.getElementById('tg-gap-badge');
+    const narr  = document.getElementById('tg-gap-narrative');
+    if (absGap < 5) {
+      badge.className   = 'gap-badge agree';
+      badge.textContent = '≈ Aligned';
+      narr.innerHTML    = 'Scoring pace and TxLine market agree — no meaningful divergence right now.';
+    } else if (gapPp > 0) {
+      badge.className   = 'gap-badge hot';
+      badge.textContent = '+' + gapPp + 'pp — pace HOT';
+      narr.innerHTML    = `Pace projects <strong style="color:var(--accent)">${projected.toFixed(1)} goals</strong>, suggesting Over is more likely than TxLine's <strong style="color:var(--sol)">${txPctRounded}%</strong> implies. Two perspectives — not a call either is right.`;
+    } else {
+      badge.className   = 'gap-badge cold';
+      badge.textContent = gapPp + 'pp — pace COLD';
+      narr.innerHTML    = `TxLine pricing Over at <strong style="color:var(--sol)">${txPctRounded}%</strong> but pace only projects <strong style="color:var(--accent)">${projected.toFixed(1)} goals</strong>. Market may be reading pressure not yet in the score.`;
+    }
+
+    // TG disagreement log (Feature 1)
+    checkTGDisagreement(txPctRounded, modPctRounded);
+    const disEl = document.getElementById('tg-disagreements');
+    if (tgDisagreements.length === 0) {
+      disEl.innerHTML = '';
+    } else {
+      disEl.innerHTML = '<div style="font-size:10px;color:var(--muted);margin-top:10px;border-top:1px solid var(--border);padding-top:8px">' +
+        '<div style="color:var(--yellow);font-weight:600;margin-bottom:4px;font-size:9px;letter-spacing:.5px">DIVERGENCE LOG</div>' +
+        tgDisagreements.map(d =>
+          `<div style="margin-bottom:3px">${d.min}' — Market ${d.txPct}%, Model ${d.modPct}% <span style="color:${d.gapPp>0?'var(--accent)':'var(--sol)'}">(${d.gapPp>0?'+':''}${d.gapPp}pp)</span></div>`
+        ).join('') +
+        '</div>';
+    }
+  }
+
+  function poissonOver25(lambda) {
+    if (lambda <= 0) return 0;
+    const e = Math.exp(-lambda);
+    return 1 - e * (1 + lambda + lambda*lambda/2);
+  }
+
+  // P(X >= k) where X ~ Poisson(lambda). Used for model TG calc conditioned on goals already scored.
+  function poissonAtLeast(lambda, k) {
+    if (k <= 0) return 1;
+    if (lambda <= 0) return 0;
+    const e = Math.exp(-lambda);
+    let cdf = 0, term = e; // term = P(X=i)
+    for (let i = 0; i < k; i++) {
+      cdf += term;
+      term *= lambda / (i + 1);
+    }
+    return Math.max(0, 1 - cdf);
+  }
+
+  // ═══════════ RESOLUTION HELPERS ═══════════
+  function checkTGDisagreement(txPct, modPct) {
+    if (Math.abs(modPct - txPct) <= 10) return;
+    const last = tgDisagreements[0];
+    if (last && last.min === matchMinute) return; // one entry per minute max
+    tgDisagreements.unshift({ min: matchMinute, txPct, modPct, gapPp: modPct - txPct });
+    if (tgDisagreements.length > 3) tgDisagreements.pop();
+  }
+
+  function checkNGWindow() {
+    const currentGoals = braGoals + gerGoals;
+    if (!ngWindow) {
+      ngWindow = { startMin: matchMinute, lastGoals: currentGoals, modPct: Math.round(computeNGModelPct()*100) };
+      return;
+    }
+    if (matchMinute - ngWindow.startMin < 5) return;
+    const goalScored   = currentGoals > ngWindow.lastGoals;
+    // Model correct if it gave >50% when a goal came, or ≤50% when no goal came
+    const modelCorrect = goalScored ? ngWindow.modPct > 50 : ngWindow.modPct <= 50;
+    ngResolution = { modelCorrect, startMin: ngWindow.startMin, min: matchMinute, goalScored, modPct: ngWindow.modPct };
+    ngWindow = { startMin: matchMinute, lastGoals: currentGoals, modPct: Math.round(computeNGModelPct()*100) };
+  }
+
+  // ═══════════ NEXT GOAL (col 3) ═══════════
+  // P(≥1 goal in next 5 min) — Poisson model using blended goals-per-minute rate.
+  // Note: shot/xG data is not yet captured from the scores stream.
+  // Pre-match: blend=0, pure pregame rate (2.75 goals/90 min). End of match: → 0%.
+  function computeNGModelPct() {
+    const total       = braGoals + gerGoals;
+    const minElapsed  = Math.max(1, matchMinute);
+    const minLeft     = Math.max(0, 90 - minElapsed);
+    const pregameRate = 2.75 / 90;
+    const obsRate     = matchIsLive ? total / minElapsed : 0;
+    const blend       = matchIsLive ? Math.min(1, total * 0.4 + (minElapsed/90) * 0.6) : 0;
+    const blendedRate = blend * obsRate + (1 - blend) * pregameRate;
+    const windowMins  = Math.min(5, minLeft);
+    return windowMins > 0 ? 1 - Math.exp(-blendedRate * windowMins) : 0;
+  }
+
+  function renderNextGoal() {
+    const narr = document.getElementById('gap-narrative');
+    const resEl = document.getElementById('ng-resolution');
+
+    if (!matchIsLive) {
+      document.getElementById('ng-model').textContent     = '--';
+      document.getElementById('ng-model-sub').textContent = 'waiting for kickoff';
+      narr.innerHTML = 'Not available — match hasn\'t started. This metric activates at kickoff using live goals and time data. Shot-level data will improve it if captured from the feed.';
+      resEl.innerHTML = '';
+      return;
+    }
+
+    const pct   = Math.round(computeNGModelPct() * 100);
+    const total = braGoals + gerGoals;
+    document.getElementById('ng-model').textContent     = pct + '%';
+    document.getElementById('ng-model-sub').textContent = total > 0
+      ? `${total} goal${total > 1 ? 's' : ''} in ${matchMinute}' · goals-rate model`
+      : `no goals yet · pregame rate (2.75 xG)`;
+    narr.innerHTML = `P(≥1 goal in next 5 min) from goals-per-minute pace. `
+      + `<span style="color:var(--muted)">Shot data not yet captured from scores stream — model will improve once available.</span>`;
+
+    // Resolution badge
+    if (!ngResolution) {
+      resEl.innerHTML = '';
+    } else {
+      const label  = ngResolution.modelCorrect ? 'Pace model called it ✅' : 'Pace model missed this one ❌';
+      const color  = ngResolution.modelCorrect ? 'var(--accent)' : 'var(--muted)';
+      const detail = ngResolution.goalScored
+        ? `Goal scored in ${ngResolution.startMin}'–${ngResolution.min}' · model gave ${ngResolution.modPct}%`
+        : `No goal in ${ngResolution.startMin}'–${ngResolution.min}' · model gave ${ngResolution.modPct}%`;
+      resEl.innerHTML = `<div style="margin-top:8px;border-top:1px solid var(--border);padding-top:8px"><span style="background:${color}22;color:${color};border:1px solid ${color}55;padding:2px 6px;border-radius:4px;font-size:9px;font-weight:700">${label}</span><div style="color:var(--muted);font-size:9px;margin-top:4px;line-height:1.4">${detail}</div></div>`;
+    }
+  }
+
+  // ═══════════ CLOCK ═══════════
+  function tickClock() {
+    if (!matchIsLive) return; // don't advance clock before kickoff
+    matchMinute = Math.min(90, matchMinute + 1);
+    document.getElementById('clock').textContent = matchMinute + "'";
+    document.getElementById('half-label').textContent = matchMinute <= 45 ? '1st Half' : '2nd Half';
+
+    checkNGWindow();
+    renderAll();
+  }
+
+  function renderAll() {
+    renderPools();
+    nudgeTxOU();
+    renderTGHero();
+    renderNextGoal();
+    buildEventTicker();
+    if (selectedOU) renderPayout();
+  }
+
+  // ═══════════ BACKEND POLLING ═══════════
+  function parseMatchClock(raw) {
+    if (raw === null || raw === undefined) return null;
+    if (typeof raw === 'number') return Math.floor(raw);
+    if (typeof raw === 'string') return parseInt(raw.split(':')[0], 10) || null;
+    return null;
+  }
+
+  async function pollBackend() {
+    const statusEl = document.getElementById('backend-status');
+    try {
+      const [stateRes, modelRes] = await Promise.all([
+        fetch('http://localhost:5001/api/state'),
+        fetch('http://localhost:5001/api/our-model')
+      ]);
+      const state = await stateRes.json();
+      await modelRes.json(); // available for future model integration
+
+      // Score + clock — handle pre-match.
+      // Use matchClock alone: TxLine may send score=0 pre-match (not null), but clock stays null until kickoff.
+      const isPreMatch = state.matchClock === null;
+      matchIsLive = !isPreMatch;
+
+      if (isPreMatch) {
+        braGoals = 0; gerGoals = 0;
+        document.getElementById('bra-score').textContent  = '0';
+        document.getElementById('ger-score').textContent  = '0';
+        document.getElementById('clock').textContent      = '--';
+        document.getElementById('half-label').textContent = 'Pre-Match';
+      } else {
+        if (state.score.participant1 !== null) braGoals = state.score.participant1;
+        if (state.score.participant2 !== null) gerGoals = state.score.participant2;
+        document.getElementById('bra-score').textContent = braGoals;
+        document.getElementById('ger-score').textContent = gerGoals;
+        const clockMin = parseMatchClock(state.matchClock);
+        if (clockMin !== null) {
+          matchMinute = clockMin;
+          document.getElementById('clock').textContent     = matchMinute + "'";
+          document.getElementById('half-label').textContent = matchMinute <= 45 ? '1st Half' : '2nd Half';
+        }
+      }
+
+      // TxLine MW implied probs → seed our pool proportions so the bars reflect real market
+      if (state.odds.matchWinner) {
+        const mw = state.odds.matchWinner;
+        const mwTotal = pool.mw.bra + pool.mw.draw + pool.mw.ger;
+        if (mw.part1 > 0 && mw.draw > 0 && mw.part2 > 0) {
+          pool.mw.bra  = Math.round(mwTotal * mw.part1 / 100);
+          pool.mw.draw = Math.round(mwTotal * mw.draw  / 100);
+          pool.mw.ger  = Math.round(mwTotal * mw.part2 / 100);
+        }
+      }
+
+      // TxLine TG odds — update decimal odds (Two Views panel) AND seed pool bar proportions
+      if (state.odds.totalGoals) {
+        const tg = state.odds.totalGoals;
+        if (tg.over  > 0) txOverOdds  = Math.round((100 / tg.over)  * 100) / 100;
+        if (tg.under > 0) txUnderOdds = Math.round((100 / tg.under) * 100) / 100;
+        if (tg.over > 0 && tg.under > 0) {
+          const tgTotal = pool.tg.over + pool.tg.under;
+          pool.tg.over  = Math.round(tgTotal * tg.over  / 100);
+          pool.tg.under = Math.round(tgTotal * tg.under / 100);
+        }
+      }
+
+      renderAll();
+      if (statusEl) statusEl.textContent = state.lastUpdated
+        ? `🟢 backend live · ${new Date(state.lastUpdated).toLocaleTimeString()}`
+        : '🟡 backend connected · no data yet';
+    } catch (err) {
+      console.warn('[GoalEdge] Backend fetch failed:', err.message);
+      if (statusEl) statusEl.textContent = '🔴 backend offline';
+    }
+  }
+
+  // ═══════════ INIT ═══════════
+  renderAll();
+  pollBackend(); // immediate first fetch
+  setInterval(pollBackend, 5000); // refresh every 5 s
+  setInterval(tickClock, 9000);
+  setInterval(() => { nudgeTxOU(); renderTGHero(); renderNextGoal(); }, 2500);
+
+  // close modal on backdrop click
+  document.getElementById('wallet-overlay').addEventListener('click', function(e) {
+    if (e.target === this) closeWalletModal();
+  });
+</script>
+</body>
+</html>

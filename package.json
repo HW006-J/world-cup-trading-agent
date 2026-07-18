@@ -1,27 +1,19 @@
 {
-  "name": "world-cup-trading-agent",
-  "version": "0.1.0",
-  "private": true,
+  "name": "goaledge-backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "test": "node --test lib/engine.test.ts lib/scanner.test.ts lib/dataSource.test.ts lib/txline/normalize.test.ts lib/trade.test.ts lib/replay/reducer.test.ts lib/replay/nextGoalNoneAnalysis.test.ts lib/monitoring/reducer.test.ts lib/monitoring/engine.test.ts lib/monitoring/liveScan.test.ts lib/model/nextGoalNoneModel.test.ts lib/model/nextGoalFeatures.test.ts lib/model/nextGoalNoneLive.test.ts"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "next": "16.2.10",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
-  },
-  "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^20",
-    "@types/react": "^19",
-    "@types/react-dom": "^19",
-    "eslint": "^9",
-    "eslint-config-next": "16.2.10",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "axios": "^1.18.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "eventsource": "^4.1.0",
+    "express": "^5.2.1"
   }
 }
