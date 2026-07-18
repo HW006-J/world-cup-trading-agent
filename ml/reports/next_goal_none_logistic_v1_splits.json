@@ -1,0 +1,22 @@
+{
+  "model_name": "next_goal_none_logistic_v1",
+  "selected_split_seed": 2,
+  "train_fixture_ids": [
+    18193785,
+    18198205,
+    18202701,
+    18209181,
+    18213979,
+    18218149,
+    18222446,
+    18241006
+  ],
+  "val_fixture_ids": [
+    18202783,
+    18237038
+  ],
+  "test_fixture_ids": [
+    18187298,
+    18192996
+  ]
+}
