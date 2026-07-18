@@ -40,14 +40,21 @@ function AgentStatePill({ state, label }: { state: AgentState; label?: string })
   );
 }
 
-function ProbabilityCompare({ opportunity }: { opportunity: Opportunity }) {
+function ProbabilityCompare({ opportunity, marketClosed }: { opportunity: Opportunity; marketClosed: boolean }) {
   const { analysis, selectionLabel, marketLabel } = opportunity;
-  const edgeTone = analysis.edgePp >= 4 ? "text-buy" : "text-foreground";
+  const edgeTone = marketClosed ? "text-foreground" : analysis.edgePp >= 4 ? "text-buy" : "text-foreground";
   return (
     <div className="rounded-xl border border-border bg-surface p-4 sm:p-5">
-      <p className="text-xs font-medium tracking-wide text-muted uppercase">
-        {selectionLabel} &middot; {marketLabel}
-      </p>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium tracking-wide text-muted uppercase">
+          {selectionLabel} &middot; {marketLabel}
+        </p>
+        {marketClosed ? (
+          <span className="rounded-full border border-border bg-surface-elevated px-2 py-0.5 text-[10px] font-semibold tracking-wide text-muted uppercase">
+            Final analysis &middot; market closed
+          </span>
+        ) : null}
+      </div>
       <div className="mt-3 grid grid-cols-3 gap-3 text-center">
         <div>
           <p className="text-xs text-muted">Market thinks</p>
@@ -68,6 +75,61 @@ function ProbabilityCompare({ opportunity }: { opportunity: Opportunity }) {
           </p>
         </div>
       </div>
+      {marketClosed ? (
+        <p className="mt-3 text-[11px] leading-relaxed text-muted">
+          Match is finished &mdash; the market is closed and this is shown for demonstration only.
+          No new trade can be opened on this outcome.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function NextGoalNoneModelCard({ opportunity, marketClosed }: { opportunity: Opportunity; marketClosed: boolean }) {
+  const { analysis } = opportunity;
+  const edgeTone = marketClosed ? "text-foreground" : analysis.edgePp >= 0 ? "text-buy" : "text-negative";
+  return (
+    <div className="rounded-xl border border-accent/30 bg-surface p-4 sm:p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs font-medium tracking-wide text-muted uppercase">
+          No further goals &middot; trained model
+        </p>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {marketClosed ? (
+            <span className="rounded-full border border-border bg-surface-elevated px-2 py-0.5 text-[10px] font-semibold tracking-wide text-muted uppercase">
+              Final analysis &middot; market closed
+            </span>
+          ) : null}
+          <span className="rounded-full border border-accent/40 bg-accent/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-accent uppercase">
+            Prototype &mdash; replay only
+          </span>
+        </div>
+      </div>
+      <div className="mt-3 grid grid-cols-3 gap-3 text-center">
+        <div>
+          <p className="text-xs text-muted">Market probability</p>
+          <p className="mt-1 text-2xl font-extrabold tabular-nums text-foreground sm:text-3xl">
+            {formatPercent(analysis.impliedProbability, 0)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted">Model probability</p>
+          <p className="mt-1 text-2xl font-extrabold tabular-nums text-accent sm:text-3xl">
+            {formatPercent(analysis.fairProbability, 0)}
+          </p>
+        </div>
+        <div>
+          <p className="text-xs text-muted">Estimated edge</p>
+          <p className={`mt-1 text-2xl font-extrabold tabular-nums sm:text-3xl ${edgeTone}`}>
+            {formatPp(analysis.edgePp, 1)}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-muted">
+        {marketClosed
+          ? "Match is finished — the market is closed. This is the model's final read on this snapshot, shown for demonstration only; it can no longer produce a trade recommendation."
+          : "Henry's logistic-regression model, trained on a small dataset and not yet reliably calibrated. Shown for this historical replay only — any resulting recommendation remains a paper trade, never real funds."}
+      </p>
     </div>
   );
 }
@@ -180,7 +242,10 @@ export function ReplayView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const marketClosed = match.status === "finished";
   const opportunity: Opportunity | null = scan.best ?? scan.closest;
+  const nextGoalNoneOpportunity =
+    scan.opportunities.find((o) => o.marketId === "nextGoal" && o.selectionId === "none") ?? null;
   const matchLabel = `${match.home.name} vs ${match.away.name}`;
   const agentLabel =
     agentState === "settled" && settledTrade
@@ -242,7 +307,11 @@ export function ReplayView({
         />
       </div>
 
-      {opportunity ? <ProbabilityCompare opportunity={opportunity} /> : null}
+      {opportunity ? <ProbabilityCompare opportunity={opportunity} marketClosed={marketClosed} /> : null}
+
+      {nextGoalNoneOpportunity ? (
+        <NextGoalNoneModelCard opportunity={nextGoalNoneOpportunity} marketClosed={marketClosed} />
+      ) : null}
 
       {hasOpportunity && opportunity ? (
         <p className="text-sm font-medium text-buy">

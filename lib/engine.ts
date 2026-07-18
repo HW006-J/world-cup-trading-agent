@@ -348,6 +348,71 @@ function alignmentFor(marketId: MarketId, selectionId: string): Alignment {
 }
 
 /**
+ * Shared tail of the analysis pipeline: turns a raw fair-probability estimate
+ * (from whichever model produced it -- the demo heuristic below, or Henry's
+ * trained model) into the full AnalysisResult, including the market-implied
+ * probability (always just 1 / decimalOdds), edge, confidence and signal.
+ * Reused as-is by every market/selection so "how edge is computed" never
+ * forks between the heuristic path and the trained-model path.
+ *
+ * Once `match.status === "finished"` the market itself is closed -- there is
+ * no further trading to be done, on any market or selection. The fair
+ * probability, implied probability and edge are still returned as computed
+ * (a finished match's trained-model output is real data, not something to
+ * fake as 100%), but the signal is unconditionally forced to "PASS" so a
+ * finished match can never surface a BUY, regardless of how large the raw
+ * edge/confidence numbers are.
+ */
+function finalizeAnalysis(
+  match: Match,
+  marketId: MarketId,
+  selectionId: string,
+  decimalOdds: number,
+  fairProbabilityRaw: number,
+  factors: FactorContribution[],
+  baselineEven: number,
+  dataMaturity: number,
+): AnalysisResult {
+  const fairProbability = clamp(fairProbabilityRaw, 0.01, 0.98);
+  const impliedProbability = 1 / decimalOdds;
+  const edgePp = (fairProbability - impliedProbability) * 100;
+
+  const decisiveness = Math.min(Math.abs(fairProbability - baselineEven) * 2, 1);
+  const confidenceRaw = 45 + 35 * dataMaturity + 20 * decisiveness;
+  const confidence = Math.round(clamp(confidenceRaw, 10, 95));
+  const confidenceLabel: ConfidenceLabel =
+    confidence >= 70 ? "High" : confidence >= 40 ? "Medium" : "Low";
+
+  const marketClosed = match.status === "finished";
+  const signal: Signal =
+    !marketClosed && edgePp >= EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD
+      ? "BUY"
+      : "PASS";
+
+  const alignment = alignmentFor(marketId, selectionId);
+  const explainedFactors: FactorExplanation[] = factors.map((f) => ({
+    id: f.id,
+    label: f.label,
+    detail: f.detail,
+    direction: resolveDirection(f.contribution, alignment),
+    magnitude: Math.abs(f.contribution),
+  }));
+
+  return {
+    marketId,
+    selectionId,
+    odds: decimalOdds,
+    impliedProbability,
+    fairProbability,
+    edgePp,
+    confidence,
+    confidenceLabel,
+    signal,
+    factors: explainedFactors,
+  };
+}
+
+/**
  * Computes the fair probability, edge vs. the quoted odds, confidence and
  * BUY/PASS signal for a given match, market and selection, along with a
  * plain-English breakdown of what drove the number.
@@ -384,40 +449,31 @@ export function computeAnalysis(
     dataMaturity = match.status === "upcoming" ? 0.2 : t;
   }
 
-  fairProbability = clamp(fairProbability, 0.01, 0.98);
-  const impliedProbability = 1 / decimalOdds;
-  const edgePp = (fairProbability - impliedProbability) * 100;
+  return finalizeAnalysis(match, marketId, selectionId, decimalOdds, fairProbability, factors, baselineEven, dataMaturity);
+}
 
-  const decisiveness = Math.min(Math.abs(fairProbability - baselineEven) * 2, 1);
-  const confidenceRaw = 45 + 35 * dataMaturity + 20 * decisiveness;
-  const confidence = Math.round(clamp(confidenceRaw, 10, 95));
-  const confidenceLabel: ConfidenceLabel =
-    confidence >= 70 ? "High" : confidence >= 40 ? "Medium" : "Low";
-
-  const signal: Signal =
-    edgePp >= EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD
-      ? "BUY"
-      : "PASS";
-
-  const alignment = alignmentFor(marketId, selectionId);
-  const explainedFactors: FactorExplanation[] = factors.map((f) => ({
-    id: f.id,
-    label: f.label,
-    detail: f.detail,
-    direction: resolveDirection(f.contribution, alignment),
-    magnitude: Math.abs(f.contribution),
-  }));
-
-  return {
-    marketId,
-    selectionId,
-    odds: decimalOdds,
-    impliedProbability,
-    fairProbability,
-    edgePp,
-    confidence,
-    confidenceLabel,
-    signal,
-    factors: explainedFactors,
-  };
+/**
+ * Analysis for the nextGoal/"none" selection using Henry's trained
+ * next_goal_none_logistic_v1 model instead of the demo heuristic above.
+ * `modelProbability` must already be computed (see lib/model/) from
+ * features that never include market odds/probability -- this function only
+ * folds that probability through the same edge/confidence/signal pipeline
+ * every other market and selection uses.
+ */
+export function computeNextGoalNoneModelAnalysis(
+  match: Match,
+  decimalOdds: number,
+  modelProbability: number,
+): AnalysisResult {
+  const t = minutesFraction(match);
+  const dataMaturity = match.status === "upcoming" ? 0.1 : t;
+  const factors: FactorContribution[] = [
+    {
+      id: "model",
+      label: "Trained model (replay prototype)",
+      contribution: modelProbability - 1 / 3,
+      detail: `Henry's logistic-regression model estimates a ${(modelProbability * 100).toFixed(1)}% chance of no further goal from this snapshot.`,
+    },
+  ];
+  return finalizeAnalysis(match, "nextGoal", "none", decimalOdds, modelProbability, factors, 1 / 3, dataMaturity);
 }

@@ -1,5 +1,13 @@
 import { computeAnalysis } from "./engine.ts";
-import type { AnalysisResult, MarketDefinition, Match, MatchDataProvider } from "./types";
+import type { AnalysisResult, MarketDefinition, MarketId, Match, MatchDataProvider } from "./types";
+
+/** Computes an AnalysisResult for one match/market/selection/odds combination. */
+export type AnalyzeFn = (
+  match: Match,
+  marketId: MarketId,
+  selectionId: string,
+  decimalOdds: number,
+) => AnalysisResult;
 
 // ---------------------------------------------------------------------------
 // Opportunity scanner
@@ -48,6 +56,7 @@ export function scanMatch(
   match: Match,
   provider: MatchDataProvider,
   markets: MarketDefinition[],
+  analyze: AnalyzeFn = computeAnalysis,
 ): ScanResult {
   const opportunities: Opportunity[] = [];
 
@@ -57,7 +66,7 @@ export function scanMatch(
     for (const selection of selections) {
       const odds = oddsBySelection[selection.id];
       if (odds === undefined) continue;
-      const analysis = computeAnalysis(match, market.id, selection.id, odds);
+      const analysis = analyze(match, market.id, selection.id, odds);
       opportunities.push({
         marketId: market.id,
         marketLabel: market.label,

@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { computeAnalysis } from "./engine.ts";
 import { demoProvider, MARKETS } from "./demoData.ts";
 import { scanAllMatches, scanMatch } from "./scanner.ts";
 
@@ -27,11 +28,41 @@ test("Germany vs Spain reproduces the prepared NO TRADE scenario", () => {
 test("Portugal vs Netherlands reproduces the prepared CLOSED scenario", () => {
   const match = findMatch("por-ned");
   assert.equal(match.status, "finished");
-  // The scan itself may still surface a qualifying opportunity; it is the
-  // application layer's responsibility to block new trades on finished
-  // matches regardless of what the scan finds.
+  // The market is closed once a match is finished: the scan still runs (so
+  // the final probabilities/edge can be displayed for demonstration), but it
+  // must never surface a qualifying opportunity, on any market -- the engine
+  // itself refuses to emit BUY for a finished match, so there's nothing left
+  // for the application layer to separately police here.
   const scan = scanMatch(match, demoProvider, MARKETS);
-  assert.ok(scan.outcomesScanned > 0);
+  assert.ok(scan.outcomesScanned > 0, "the finished match is still scanned for display purposes");
+  assert.equal(scan.best, null, "a finished match must never produce a qualifying (BUY) opportunity");
+  assert.ok(
+    scan.opportunities.every((o) => o.analysis.signal !== "BUY"),
+    "no market/selection on a finished match may carry a BUY signal, even ones with a large apparent edge",
+  );
+});
+
+test("a finished match never produces BUY on any market, even where the raw edge is large", () => {
+  const match = findMatch("por-ned");
+  const scan = scanMatch(match, demoProvider, MARKETS);
+  // por-ned is tuned so several selections (nextGoal/none, matchWinner/home,
+  // overUnder/over) would clear the BUY threshold on raw edge/confidence
+  // alone -- proving the exclusion is real, not vacuous.
+  const wouldHaveQualified = scan.opportunities.filter(
+    (o) => o.analysis.edgePp >= 4 && o.analysis.confidence >= 55,
+  );
+  assert.ok(
+    wouldHaveQualified.length > 0,
+    "expected at least one selection whose raw edge/confidence would otherwise qualify",
+  );
+  assert.ok(wouldHaveQualified.every((o) => o.analysis.signal === "PASS"));
+
+  const marketsSeen = new Set(scan.opportunities.map((o) => o.marketId));
+  assert.deepEqual(
+    [...marketsSeen].sort(),
+    ["matchWinner", "nextGoal", "overUnder"],
+    "the exclusion must apply across every market, not only nextGoal/none",
+  );
 });
 
 test("scanMatch handles zero supported markets cleanly", () => {
@@ -121,6 +152,47 @@ test("scanAllMatches handles an empty *live* set safely (e.g. no matches current
   assert.equal(scan.matchesScanned, 0);
   assert.equal(scan.best, null);
   assert.equal(scan.closest, null, "with nothing to rank, there is no closest opportunity either");
+});
+
+test("scanMatch accepts an optional analyze override and defaults to computeAnalysis", () => {
+  const match = findMatch("eng-fra");
+  let calls = 0;
+  const scan = scanMatch(match, demoProvider, MARKETS, (m, marketId, selectionId, odds) => {
+    calls++;
+    return computeAnalysis(m, marketId, selectionId, odds);
+  });
+  assert.equal(calls, scan.outcomesScanned);
+
+  const defaultScan = scanMatch(match, demoProvider, MARKETS);
+  assert.deepEqual(scan.opportunities, defaultScan.opportunities);
+});
+
+test("scanMatch's analyze override can change results for one selection only", () => {
+  const match = findMatch("eng-fra");
+  const scan = scanMatch(match, demoProvider, MARKETS, (m, marketId, selectionId, odds) => {
+    if (marketId === "nextGoal" && selectionId === "none") {
+      return { ...computeAnalysis(m, marketId, selectionId, odds), fairProbability: 0.9 };
+    }
+    return computeAnalysis(m, marketId, selectionId, odds);
+  });
+  const defaultScan = scanMatch(match, demoProvider, MARKETS);
+
+  const overriddenNone = scan.opportunities.find(
+    (o) => o.marketId === "nextGoal" && o.selectionId === "none",
+  );
+  const defaultNone = defaultScan.opportunities.find(
+    (o) => o.marketId === "nextGoal" && o.selectionId === "none",
+  );
+  assert.equal(overriddenNone?.analysis.fairProbability, 0.9);
+  assert.notEqual(overriddenNone?.analysis.fairProbability, defaultNone?.analysis.fairProbability);
+
+  for (const opp of scan.opportunities) {
+    if (opp.marketId === "nextGoal" && opp.selectionId === "none") continue;
+    const matching = defaultScan.opportunities.find(
+      (o) => o.marketId === opp.marketId && o.selectionId === opp.selectionId,
+    );
+    assert.deepEqual(opp.analysis, matching?.analysis);
+  }
 });
 
 test("demo mode never invokes fetch", () => {

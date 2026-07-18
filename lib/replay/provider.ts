@@ -1,12 +1,12 @@
-import { MARKETS, selectionsFor } from "@/lib/demoData";
-import type { Match, MatchDataProvider, MarketId } from "@/lib/types";
+import { MARKETS, selectionsFor } from "../demoData.ts";
+import type { Match, MatchDataProvider, MarketId } from "../types.ts";
 import {
   REPLAY_AWAY,
   REPLAY_HOME,
   REPLAY_MATCH_ID,
   REPLAY_TOTAL_GOALS_LINE,
-} from "./fixture";
-import type { ReplayTick } from "./types";
+} from "./fixture.ts";
+import type { ReplayTick } from "./types.ts";
 
 /** Builds the full Match object for a given replay tick, using the shared domain types. */
 export function matchForTick(tick: ReplayTick): Match {

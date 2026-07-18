@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { scanMatch, type ScanResult } from "@/lib/scanner";
 import { settleTrade } from "@/lib/trade";
-import type { Match, PaperTrade } from "@/lib/types";
+import type { MarketId, Match, PaperTrade } from "@/lib/types";
 import {
   REPLAY_MARKET_MOVEMENT_TICK_INDEX,
   REPLAY_OPPORTUNITY_TICK_INDEX,
@@ -12,6 +12,7 @@ import {
   REPLAY_TOTAL_MS,
   tickIndexForElapsed,
 } from "./fixture";
+import { analyzeReplayTick, snapshotHistoryForTicks } from "./nextGoalNoneAnalysis";
 import { createReplayProvider, matchForTick } from "./provider";
 import {
   INITIAL_REPLAY_STATE,
@@ -116,9 +117,21 @@ export function useReplay(
   const tick = REPLAY_TICKS[tickIndex];
   const match = useMemo(() => matchForTick(tick), [tick]);
   const provider = useMemo(() => createReplayProvider(tick), [tick]);
+  // Only the ticks at or before the current one ever reach the model -- see
+  // snapshotHistoryForTicks. Every market/selection other than nextGoal/none
+  // still goes through the unmodified computeAnalysis heuristic.
+  const history = useMemo(
+    () => snapshotHistoryForTicks(REPLAY_TICKS, tickIndex),
+    [tickIndex],
+  );
+  const analyze = useCallback(
+    (m: Match, marketId: MarketId, selectionId: string, odds: number) =>
+      analyzeReplayTick(m, marketId, selectionId, odds, history),
+    [history],
+  );
   const scan: ScanResult = useMemo(
-    () => scanMatch(match, provider, provider.getSupportedMarkets(match)),
-    [match, provider],
+    () => scanMatch(match, provider, provider.getSupportedMarkets(match), analyze),
+    [match, provider, analyze],
   );
 
   const hasMarketMovement = tickIndex >= REPLAY_MARKET_MOVEMENT_TICK_INDEX;
