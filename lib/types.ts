@@ -81,6 +81,31 @@ export interface FactorExplanation {
 export type Signal = "BUY" | "PASS";
 export type ConfidenceLabel = "Low" | "Medium" | "High";
 
+/**
+ * Where an AnalysisResult's fairProbability came from. "trained_model" is
+ * only ever used for the nextGoal market's "none" selection, and only when
+ * the trained model's required live inputs were genuinely available (see
+ * lib/model/liveFeatureAdapter.ts) -- every other market/selection, and any
+ * nextGoal/none case where a required input was unavailable, is always
+ * "heuristic_fallback" (lib/engine.ts, unchanged).
+ */
+export type ProbabilitySource = "trained_model" | "heuristic_fallback";
+
+/**
+ * The trained model's own two probabilities, exactly as ml/predict.py names
+ * them (see lib/model/nextGoalNoneModel.ts) -- only ever present when
+ * probabilitySource is "trained_model". Kept separate from fairProbability
+ * (which is clamped into the same 1%-98% band the heuristic path has
+ * always used, to keep the edge/confidence/signal math identical either
+ * way) so the UI can show the model's real output un-distorted by that
+ * trading-math clamp.
+ */
+export interface NextGoalNoneModelProbabilities {
+  model_name: string;
+  model_probability_next_goal_none: number;
+  model_probability_another_goal: number;
+}
+
 export interface AnalysisResult {
   marketId: MarketId;
   selectionId: string;
@@ -93,6 +118,19 @@ export interface AnalysisResult {
   confidenceLabel: ConfidenceLabel;
   signal: Signal;
   factors: FactorExplanation[];
+  probabilitySource: ProbabilitySource;
+  /** Only set when probabilitySource === "trained_model". */
+  modelProbabilities?: NextGoalNoneModelProbabilities;
+  /**
+   * Concise, human-readable context for nextGoal/none only, supplied by a
+   * caller that tracks live goal-history trust (see
+   * lib/monitoring/goalHistoryTracker.ts's describeGoalHistoryState) --
+   * either why the trained model is unavailable this cycle, or that an
+   * available prediction's timing came from an observed live score
+   * transition. Undefined for every other market/selection, and for
+   * Replay/demo callers that don't supply one.
+   */
+  probabilityContextNote?: string;
 }
 
 export type TradeStatus = "open" | "won" | "lost";

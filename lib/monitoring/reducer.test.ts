@@ -50,6 +50,7 @@ function makeOpportunity(
     confidenceLabel: "Medium",
     signal,
     factors: [],
+    probabilitySource: "heuristic_fallback",
   };
   return {
     marketId,

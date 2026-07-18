@@ -1,7 +1,7 @@
 import type { AnalysisResult, Signal } from "@/lib/types";
-import { formatPercent, formatPp } from "@/lib/format";
+import { describeProbabilityContextNote, formatPercent, formatPp, probabilitySourceLabel } from "@/lib/format";
 import { buildVerdictNarrative } from "@/lib/narrative";
-import { Panel, Stat } from "./ui";
+import { Panel, Pill, Stat } from "./ui";
 
 function VerdictBadge({ signal }: { signal: Signal }) {
   const isBuy = signal === "BUY";
@@ -41,6 +41,10 @@ export function VerdictPanel({
 }) {
   const narrative = buildVerdictNarrative(analysis, selectionLabel);
   const edgeTone = analysis.edgePp > 0 ? "buy" : analysis.edgePp < 0 ? "negative" : "neutral";
+  // "Where nextGoal/none reasoning is shown" -- every other market/selection
+  // always uses the heuristic, so the source badge and the model's own raw
+  // probabilities are only worth surfacing for this one case.
+  const isNextGoalNone = analysis.marketId === "nextGoal" && analysis.selectionId === "none";
 
   return (
     <Panel
@@ -50,9 +54,16 @@ export function VerdictPanel({
         <VerdictBadge signal={analysis.signal} />
 
         <div className="min-w-0 flex-1">
-          <p className="text-xs font-medium tracking-wide text-muted uppercase">
-            Agent verdict &middot; {marketLabel}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs font-medium tracking-wide text-muted uppercase">
+              Agent verdict &middot; {marketLabel}
+            </p>
+            {isNextGoalNone ? (
+              <Pill tone={analysis.probabilitySource === "trained_model" ? "accent" : "neutral"}>
+                {probabilitySourceLabel(analysis.probabilitySource)}
+              </Pill>
+            ) : null}
+          </div>
           <h2 className="mt-0.5 text-lg font-semibold text-foreground">
             {selectionLabel}{" "}
             <span className="font-normal text-muted">&middot; {matchLabel}</span>
@@ -82,6 +93,21 @@ export function VerdictPanel({
             />
           </div>
 
+          {isNextGoalNone && analysis.modelProbabilities ? (
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Stat
+                label="No further goal"
+                value={formatPercent(analysis.modelProbabilities.model_probability_next_goal_none)}
+                hint="Trained model's own probability"
+              />
+              <Stat
+                label="Another goal"
+                value={formatPercent(analysis.modelProbabilities.model_probability_another_goal)}
+                hint="Trained model's own probability"
+              />
+            </div>
+          ) : null}
+
           <p className="mt-4 text-sm leading-relaxed text-foreground">{narrative.headline}</p>
           <p className="mt-1 text-sm leading-relaxed text-muted">{narrative.detail}</p>
 
@@ -89,6 +115,17 @@ export function VerdictPanel({
             <p className="mt-2 text-xs text-muted">
               This match has finished &mdash; figures shown for reference only.
             </p>
+          ) : null}
+
+          {isNextGoalNone ? (
+            <div className="mt-2 flex flex-col gap-0.5">
+              <p className="text-[11px] text-muted">{describeProbabilityContextNote(analysis)}</p>
+              <p className="text-[11px] text-muted">
+                {analysis.probabilitySource === "trained_model"
+                  ? "Experimental model trained on a limited historical dataset -- not proven profitable and not financial advice."
+                  : "Trained model unavailable for this match -- using the rule-based heuristic instead."}
+              </p>
+            </div>
           ) : null}
         </div>
       </div>

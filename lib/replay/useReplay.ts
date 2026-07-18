@@ -116,9 +116,15 @@ export function useReplay(
   const tick = REPLAY_TICKS[tickIndex];
   const match = useMemo(() => matchForTick(tick), [tick]);
   const provider = useMemo(() => createReplayProvider(tick), [tick]);
+  // Replay mode is the only place a genuine chronological (minute, score)
+  // history is available (see lib/model/liveFeatureAdapter.ts) -- every
+  // tick up to and including the current one, in order, is exactly the
+  // GoalHistoryPoint[] shape the nextGoal/none trained model needs to
+  // derive time_since_last_goal without guessing.
+  const goalHistory = useMemo(() => REPLAY_TICKS.slice(0, tickIndex + 1), [tickIndex]);
   const scan: ScanResult = useMemo(
-    () => scanMatch(match, provider, provider.getSupportedMarkets(match)),
-    [match, provider],
+    () => scanMatch(match, provider, provider.getSupportedMarkets(match), goalHistory),
+    [match, provider, goalHistory],
   );
 
   const hasMarketMovement = tickIndex >= REPLAY_MARKET_MOVEMENT_TICK_INDEX;

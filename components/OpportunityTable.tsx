@@ -32,6 +32,15 @@ export function OpportunityTable({ opportunities }: { opportunities: Opportunity
               </td>
               <td className="py-2 pr-3 tabular-nums">
                 {formatPercent(o.analysis.fairProbability)}
+                {o.analysis.probabilitySource === "trained_model" ? (
+                  <span
+                    title="Trained ML model (next_goal_none_logistic_v1)"
+                    aria-label="Trained ML model"
+                    className="ml-1 text-[10px] font-semibold text-accent"
+                  >
+                    ML
+                  </span>
+                ) : null}
               </td>
               <td
                 className={`py-2 pr-3 tabular-nums ${

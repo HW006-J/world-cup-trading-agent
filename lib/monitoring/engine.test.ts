@@ -45,6 +45,7 @@ function qualifyingScan(): CrossMatchScanResult {
     confidenceLabel: "High",
     signal: "BUY",
     factors: [],
+    probabilitySource: "heuristic_fallback",
   };
   const opportunity: CrossMatchOpportunity = {
     marketId: "nextGoal",

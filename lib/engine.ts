@@ -21,7 +21,12 @@ export const EDGE_THRESHOLD_PP = 4;
 export const CONFIDENCE_THRESHOLD = 55;
 const DIRECTION_EPSILON = 0.02;
 
-function clamp(value: number, min: number, max: number): number {
+// Exported (not just used internally) so lib/scanner.ts's trained-model
+// integration can reuse the exact same clamp/minute-fraction math when
+// building an AnalysisResult from the model's fairProbability, instead of a
+// second copy that could silently drift from this one. No behavior change
+// to either function.
+export function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
@@ -29,8 +34,13 @@ function sigmoid(x: number): number {
   return 1 / (1 + Math.exp(-x));
 }
 
-function minutesFraction(match: Match): number {
+export function minutesFraction(match: Match): number {
   return clamp(match.minute / 90, 0, 1);
+}
+
+/** Single source of truth for the confidence-score -> label thresholds, reused by lib/scanner.ts's trained-model path. */
+export function confidenceLabelFor(confidence: number): ConfidenceLabel {
+  return confidence >= 70 ? "High" : confidence >= 40 ? "Medium" : "Low";
 }
 
 function minutesRemaining(match: Match): number {
@@ -391,8 +401,7 @@ export function computeAnalysis(
   const decisiveness = Math.min(Math.abs(fairProbability - baselineEven) * 2, 1);
   const confidenceRaw = 45 + 35 * dataMaturity + 20 * decisiveness;
   const confidence = Math.round(clamp(confidenceRaw, 10, 95));
-  const confidenceLabel: ConfidenceLabel =
-    confidence >= 70 ? "High" : confidence >= 40 ? "Medium" : "Low";
+  const confidenceLabel: ConfidenceLabel = confidenceLabelFor(confidence);
 
   const signal: Signal =
     edgePp >= EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD
@@ -419,5 +428,6 @@ export function computeAnalysis(
     confidenceLabel,
     signal,
     factors: explainedFactors,
+    probabilitySource: "heuristic_fallback",
   };
 }

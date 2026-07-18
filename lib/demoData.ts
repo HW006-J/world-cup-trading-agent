@@ -1,3 +1,4 @@
+import type { GoalHistoryPoint } from "./model/liveFeatureAdapter";
 import type {
   Match,
   MarketDefinition,
@@ -139,6 +140,45 @@ const ODDS: Record<string, Record<MarketId, OddsBySelection>> = {
     nextGoal: { home: 2.2, away: 3.1, none: 1.4 },
     overUnder: { over: 1.85, under: 1.95 },
   },
+};
+
+/**
+ * Explicit, authored goal history for each demo scenario -- part of the
+ * same synthetic scenario as MATCHES/ODDS above, not inferred from a single
+ * current score (see lib/monitoring/goalHistoryTracker.ts, which is what
+ * derives this honestly for real live TxLINE matches instead). This is what
+ * lets the trained next_goal_none_logistic_v1 model run in demo mode too,
+ * via the same lib/model/liveFeatureAdapter.ts seam Replay and live
+ * TxLINE polling both use -- routed through DEMO_GOAL_HISTORY below rather
+ * than a separate code path.
+ *
+ * Each entry is chronological and consistent with that match's own
+ * homeScore/awayScore/minute in MATCHES: replaying the listed goals in
+ * order reproduces the exact current score at the exact current minute.
+ */
+export const DEMO_GOAL_HISTORY: Record<string, GoalHistoryPoint[]> = {
+  // 1-1 by minute 67: Brazil open the scoring, Argentina equalize.
+  "bra-arg": [
+    { minute: 0, homeScore: 0, awayScore: 0 },
+    { minute: 24, homeScore: 1, awayScore: 0 },
+    { minute: 58, homeScore: 1, awayScore: 1 },
+  ],
+  // 1-0 by minute 35 -- "England have just taken a surprise lead" (see the
+  // MATCHES comment above): the goal is recent, not from deep in the match.
+  "eng-fra": [
+    { minute: 0, homeScore: 0, awayScore: 0 },
+    { minute: 33, homeScore: 1, awayScore: 0 },
+  ],
+  // Upcoming, still 0-0 -- no goals at all yet.
+  "ger-esp": [{ minute: 0, homeScore: 0, awayScore: 0 }],
+  // 2-1 by full time: Portugal score either side of half-time, Netherlands
+  // pull one back late.
+  "por-ned": [
+    { minute: 0, homeScore: 0, awayScore: 0 },
+    { minute: 12, homeScore: 1, awayScore: 0 },
+    { minute: 58, homeScore: 2, awayScore: 0 },
+    { minute: 77, homeScore: 2, awayScore: 1 },
+  ],
 };
 
 export function selectionsFor(match: Match, marketId: MarketId): MarketSelection[] {

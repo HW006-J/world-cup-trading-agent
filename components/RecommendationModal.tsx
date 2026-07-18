@@ -6,10 +6,17 @@ import type { ScanResult } from "@/lib/scanner";
 import { buildPaperTrade } from "@/lib/trade";
 import { buildVerdictNarrative, describeTrade } from "@/lib/narrative";
 import { CONFIDENCE_THRESHOLD, EDGE_THRESHOLD_PP } from "@/lib/engine";
-import { formatCurrency, formatOdds, formatPercent, formatPp } from "@/lib/format";
+import {
+  describeProbabilityContextNote,
+  formatCurrency,
+  formatOdds,
+  formatPercent,
+  formatPp,
+  probabilitySourceLabel,
+} from "@/lib/format";
 import { Modal } from "./Modal";
 import { ExplainabilityPanel } from "./ExplainabilityPanel";
-import { Stat } from "./ui";
+import { Pill, Stat } from "./ui";
 
 const DEFAULT_SCAN_DELAY_MS = 450;
 const DEFAULT_STAKE = "10";
@@ -206,6 +213,7 @@ export function RecommendationModal({
   // --- Qualifying opportunity ------------------------------------------------
   const opportunity = scan.best;
   const narrative = buildVerdictNarrative(opportunity.analysis, opportunity.selectionLabel);
+  const isNextGoalNone = opportunity.marketId === "nextGoal" && opportunity.selectionId === "none";
   const stakeValue = Number(stakeInput);
   const stakeIsValid = Number.isFinite(stakeValue) && stakeValue > 0;
   const potentialReturn = stakeIsValid ? stakeValue * opportunity.odds : 0;
@@ -283,6 +291,17 @@ export function RecommendationModal({
 
         {showReasoning ? (
           <div className="flex flex-col gap-3 border-t border-border pt-3">
+            {isNextGoalNone ? (
+              <div className="flex flex-col gap-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-muted">Probability source:</span>
+                  <Pill tone={opportunity.analysis.probabilitySource === "trained_model" ? "accent" : "neutral"}>
+                    {probabilitySourceLabel(opportunity.analysis.probabilitySource)}
+                  </Pill>
+                </div>
+                <p className="text-[11px] text-muted">{describeProbabilityContextNote(opportunity.analysis)}</p>
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-2">
               <Stat
                 label="Market probability"
@@ -297,6 +316,24 @@ export function RecommendationModal({
               <Stat label="Edge" value={formatPp(opportunity.analysis.edgePp)} tone="buy" />
               <Stat label="Confidence" value={`${opportunity.analysis.confidence}/100`} />
             </div>
+            {isNextGoalNone && opportunity.analysis.modelProbabilities ? (
+              <div className="grid grid-cols-2 gap-2">
+                <Stat
+                  label="No further goal"
+                  value={formatPercent(
+                    opportunity.analysis.modelProbabilities.model_probability_next_goal_none,
+                  )}
+                  hint="Trained model's own probability"
+                />
+                <Stat
+                  label="Another goal"
+                  value={formatPercent(
+                    opportunity.analysis.modelProbabilities.model_probability_another_goal,
+                  )}
+                  hint="Trained model's own probability"
+                />
+              </div>
+            ) : null}
             <p className="text-xs text-muted">{narrative.detail}</p>
             <ExplainabilityPanel
               factors={opportunity.analysis.factors}
@@ -305,6 +342,12 @@ export function RecommendationModal({
               title="Top reasons"
               bare
             />
+            {isNextGoalNone ? (
+              <p className="text-[11px] text-muted">
+                Experimental model, trained on a limited historical dataset &mdash; not proven
+                profitable and not financial advice.
+              </p>
+            ) : null}
           </div>
         ) : null}
 

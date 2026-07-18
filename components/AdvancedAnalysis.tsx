@@ -2,9 +2,8 @@
 
 import { useState } from "react";
 import type { Match, MarketId, PaperTrade } from "@/lib/types";
-import type { ScanResult } from "@/lib/scanner";
-import { demoProvider } from "@/lib/demoData";
-import { computeAnalysis } from "@/lib/engine";
+import { analyzeSelection, type ScanResult } from "@/lib/scanner";
+import { demoProvider, DEMO_GOAL_HISTORY } from "@/lib/demoData";
 import { buildPaperTrade } from "@/lib/trade";
 import { MarketSelector } from "./MarketSelector";
 import { VerdictPanel } from "./VerdictPanel";
@@ -38,7 +37,9 @@ export function AdvancedAnalysis({
   const selection = selections.find((s) => s.id === selectionId) ?? selections[0];
   const odds = demoProvider.getOdds(match.id, marketId)[selection?.id ?? ""];
   const analysis =
-    selection && odds !== undefined ? computeAnalysis(match, marketId, selection.id, odds) : null;
+    selection && odds !== undefined
+      ? analyzeSelection(match, marketId, selection.id, odds, DEMO_GOAL_HISTORY[match.id])
+      : null;
   const matchLabel = `${match.home.name} vs ${match.away.name}`;
 
   function handleSelectMarket(id: string) {
