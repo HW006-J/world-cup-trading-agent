@@ -314,12 +314,18 @@ def export_model_json(model: Pipeline, selected_seed: int, out_path: Path) -> No
 
 
 def export_splits_json(train_ids: set, val_ids: set, test_ids: set, selected_seed: int, out_path: Path) -> None:
+    # str(x), not int(x): fixture_id can be a provider-prefixed string (e.g.
+    # "statsbomb_2018_8650") once datasets from more than one provider are
+    # combined, not just TxLINE's native integer ids. str() is a no-op for
+    # values that are already numeric-looking, and sorts consistently
+    # either way -- this is the minimal change needed to stop assuming
+    # fixture_id is always an int (see combine_datasets.py / FIXTURE IDS).
     payload = {
         "model_name": MODEL_NAME,
         "selected_split_seed": selected_seed,
-        "train_fixture_ids": sorted(int(x) for x in train_ids),
-        "val_fixture_ids": sorted(int(x) for x in val_ids),
-        "test_fixture_ids": sorted(int(x) for x in test_ids),
+        "train_fixture_ids": sorted(str(x) for x in train_ids),
+        "val_fixture_ids": sorted(str(x) for x in val_ids),
+        "test_fixture_ids": sorted(str(x) for x in test_ids),
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2))
@@ -379,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     for name, split_df in (("train", train_df), ("val", val_df), ("test", test_df)):
-        fixtures = sorted(int(x) for x in split_df[ID_COLUMN].unique())
+        fixtures = sorted(str(x) for x in split_df[ID_COLUMN].unique())  # str(): supports provider-prefixed string ids
         print(f"  {name}: {len(split_df)} rows / {len(fixtures)} fixtures {fixtures}")
 
     model = build_pipeline(selected_seed)
@@ -567,6 +573,59 @@ def _run_self_tests() -> int:
     assert abs(
         result["model_probability_next_goal_none"] + result["model_probability_another_goal"] - 1.0
     ) < 1e-12
+
+    # 8. Grouped STRING and MIXED int/string fixture ids (requirement: this
+    # module must support combine_datasets.py's provider-prefixed StatsBomb
+    # ids, e.g. "statsbomb_2018_8650", alongside TxLINE's native int ids in
+    # the very same dataset -- the real shape of next_goal_none_combined.csv).
+    # Exercises split_dataset(), find_seed_with_both_labels(), a full
+    # fit/predict/metrics pass, and export_splits_json() end to end.
+    string_dataset_rows = _synthetic_dataset(n_fixtures=12, seed=7)
+    string_dataset_rows[ID_COLUMN] = string_dataset_rows[ID_COLUMN].map(lambda fid: f"statsbomb_2018_{7000 + fid}")
+    mixed_dataset = pd.concat(
+        [_synthetic_dataset(n_fixtures=12, seed=3), string_dataset_rows],
+        ignore_index=True,
+    )
+    # Half the fixture_id values are plain ints (TxLINE-style), half are
+    # provider-prefixed strings (StatsBomb-style) -- pandas reads a real
+    # combined CSV's mixed fixture_id column as all-str (confirmed via
+    # pd.read_csv), so coerce the same way here rather than leaving a
+    # Python-int/str mix in memory that a real CSV round-trip wouldn't have.
+    mixed_dataset[ID_COLUMN] = mixed_dataset[ID_COLUMN].map(str)
+
+    mixed_ids = mixed_dataset[ID_COLUMN].unique().tolist()
+    assert any(isinstance(x, str) and x.startswith("statsbomb_2018_") for x in mixed_ids)
+    assert any(isinstance(x, str) and x.isdigit() for x in mixed_ids)
+
+    mixed_train_ids, mixed_val_ids, mixed_test_ids = split_fixture_ids(mixed_ids, seed=0)
+    assert_disjoint_fixture_ids(mixed_train_ids, mixed_val_ids, mixed_test_ids)
+    assert len(mixed_train_ids) + len(mixed_val_ids) + len(mixed_test_ids) == len(mixed_ids)
+
+    mixed_seed = find_seed_with_both_labels(mixed_dataset, seed_limit=200)
+    mixed_train_df, mixed_val_df, mixed_test_df = split_dataset(mixed_dataset, mixed_seed)
+    assert _both_labels_present(mixed_train_df)
+    assert _both_labels_present(mixed_val_df)
+    assert _both_labels_present(mixed_test_df)
+
+    mixed_model = build_pipeline(mixed_seed)
+    fit_pipeline(mixed_model, mixed_train_df[MODEL_FEATURES], mixed_train_df[LABEL_COLUMN])
+    mixed_baseline = float(mixed_train_df[LABEL_COLUMN].mean())
+    for split_df in (mixed_train_df, mixed_val_df, mixed_test_df):
+        mixed_metrics = compute_metrics(mixed_model, split_df, mixed_baseline)
+        assert 0.0 <= mixed_metrics["accuracy"] <= 1.0
+
+    # export_splits_json() must not crash on string ids (this is exactly
+    # the int(x)-on-a-non-numeric-string crash this module was fixed for --
+    # see the str(x) conversions in export_splits_json() and the per-split
+    # print loop in main()).
+    splits_tmp_path = Path(tempfile.mkdtemp()) / "splits.json"
+    export_splits_json(mixed_train_ids, mixed_val_ids, mixed_test_ids, mixed_seed, splits_tmp_path)
+    splits_payload = json.loads(splits_tmp_path.read_text())
+    all_exported_ids = (
+        splits_payload["train_fixture_ids"] + splits_payload["val_fixture_ids"] + splits_payload["test_fixture_ids"]
+    )
+    assert set(all_exported_ids) == set(mixed_ids)
+    assert all(isinstance(x, str) for x in all_exported_ids)
 
     print(f"(self-test used synthetic search seed {selected_seed} on synthetic data -- unrelated to a real training run's selected seed)")
     print("All self-tests passed.")

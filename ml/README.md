@@ -9,10 +9,13 @@ model exists.
 ## Pipeline
 
 ```
-download_replay.py  -->  ml/data/raw/{fixture_id}/*.json
-build_dataset.py     -->  ml/data/processed/next_goal_none.csv
-train.py              -->  reports a 70/15/15 grouped split (no fitting yet)
-evaluate.py            -->  refuses to run (no model exists yet)
+download_replay.py         -->  ml/data/raw/{fixture_id}/*.json
+build_dataset.py            -->  ml/data/processed/next_goal_none.csv
+download_statsbomb.py       -->  ml/data/external/statsbomb/{matches.json, events/{match_id}.json}
+build_statsbomb_dataset.py   -->  ml/data/processed/statsbomb_next_goal_none.csv
+combine_datasets.py           -->  ml/data/processed/next_goal_none_combined.csv
+train.py                       -->  fits next_goal_none_logistic_v1 on whichever --processed-csv is given
+evaluate.py                     -->  refuses to run until a model exists
 ```
 
 ## 1. download_replay.py
@@ -169,6 +172,104 @@ scope for this phase.
 
 `evaluate.py` looks for a saved model under `ml/models/*.joblib` and exits
 with a clear message if none exists (which is the current state).
+
+## 4. StatsBomb Open Data importer (2018 Men's FIFA World Cup)
+
+A second, independent data source for the exact same `next_goal_none`
+snapshot schema, used because Devnet only retains 13 usable TxLINE
+fixtures. Uses **only** the official StatsBomb/Hudl Open Data repository,
+`https://github.com/hudl/open-data` — no unofficial mirrors — served
+unauthenticated via `raw.githubusercontent.com`.
+
+### Attribution
+
+This project uses free public data provided by StatsBomb (via Hudl), per
+their [Open Data](https://github.com/hudl/open-data) usage terms. StatsBomb
+data is used for research/educational purposes here, not sold or
+redistributed as a standalone product. Full license/terms:
+https://github.com/hudl/open-data/blob/master/LICENSE.pdf
+
+### 4a. download_statsbomb.py
+
+```bash
+ml/.venv/bin/python3 ml/download_statsbomb.py
+ml/.venv/bin/python3 ml/download_statsbomb.py --self-test   # offline unit checks, no network
+```
+Discovers `competition_id`/`season_id` live from the official
+`competitions.json` by matching `competition_name == "FIFA World Cup"`,
+`season_name == "2018"`, `competition_gender == "male"` — never hard-coded
+(confirmed at the time of writing to resolve to `competition_id=43`,
+`season_id=3`, but re-derived every run). Downloads the matches list and
+every match's event file, saved untouched under:
+```
+ml/data/external/statsbomb/
+  matches.json
+  events/{match_id}.json
+```
+Resumable: an existing valid non-empty events file is skipped; a
+missing/empty/corrupt one is retried; an individual match's failure doesn't
+stop the run. `--max-matches` caps how many *new* downloads happen in one
+run (already-downloaded matches don't count against it). This directory is
+gitignored (see `.gitignore`) — re-run this script to repopulate it.
+
+### 4b. build_statsbomb_dataset.py
+
+```bash
+ml/.venv/bin/python3 ml/build_statsbomb_dataset.py
+ml/.venv/bin/python3 ml/build_statsbomb_dataset.py --self-test
+```
+Reads the raw event files and produces
+`ml/data/processed/statsbomb_next_goal_none.csv` in the **exact same**
+`COLUMN_ORDER`/`SNAPSHOT_MINUTES`/`MODEL_FEATURES` as `build_dataset.py`
+(imported, not redefined). Fixture ids are provider-prefixed —
+`statsbomb_2018_<match_id>` — so they can never collide with TxLINE's plain
+integer ids once combined.
+
+**Confirmed event mapping** (verified by downloading and inspecting all 64
+real 2018 World Cup match files, then cross-checking derived goal totals
+against every match's official score — 0 mismatches across all 64 matches;
+this cross-check is also a standing correctness guard at build time, not
+just a one-off research step):
+- **Match minute**: `event["minute"] + event["second"] / 60.0` — already
+  cumulative across periods (unlike `timestamp`, which resets each period).
+- **Goals**: `type.name == "Shot"` with `shot.outcome.name == "Goal"`, or
+  `type.name == "Own Goal For"` (credited to the *benefiting* team — its
+  `related_events` counterpart `"Own Goal Against"` is not also counted, or
+  every own goal would double). There is no "disallowed" shot outcome in
+  the schema — a VAR-disallowed effort is simply never coded as `"Goal"`.
+- **Dismissals** (red cards): `type.name == "Foul Committed"` with
+  `foul_committed.card.name`, or `type.name == "Bad Behaviour"` with
+  `bad_behaviour.card.name`, in `{"Red Card", "Second Yellow"}`. Plain
+  `"Yellow Card"` is not a dismissal.
+- **Penalty shootout exclusion**: `period == 5` events are excluded
+  entirely from goal/card extraction. `shot.type.name == "Penalty"` is used
+  for both in-game and shootout penalties, so **period**, not shot type, is
+  the only reliable exclusion signal.
+- **Extra time**: periods 3/4 count exactly like periods 1/2 — a goal in
+  extra time is a real later goal for `label_next_goal_none`, even at
+  snapshot minute 80, since it's not a shootout goal.
+
+### 4c. combine_datasets.py
+
+```bash
+ml/.venv/bin/python3 ml/combine_datasets.py
+ml/.venv/bin/python3 ml/combine_datasets.py --self-test
+```
+Reads both processed CSVs, validates each has exactly `COLUMN_ORDER`,
+concatenates without renaming/reordering any field, rejects any fixture id
+that appears under more than one provider, and writes
+`ml/data/processed/next_goal_none_combined.csv`. Reports per-provider and
+combined fixture/row counts and label balance.
+
+### Domain-shift warning
+
+StatsBomb's 2018 Men's World Cup and TxLINE's 2026 matches are **different
+competitions, seasons, and data providers** — combining them adds training
+volume, but the two sources are not guaranteed to be statistically
+identical. Evaluate and report metrics **per provider**, not just in
+aggregate, and treat a combined-data model's TxLINE-specific performance as
+the number that actually matters for TxLINE trading — a StatsBomb-driven
+metric improvement can mask a TxLINE-specific regression.
 
 ## Blockers / open uncertainties for Henry
 

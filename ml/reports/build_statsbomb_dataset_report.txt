@@ -1,0 +1,5 @@
+Matches processed: 64
+Matches skipped: 0
+Fixtures written: 64
+Snapshot rows written: 448
+Output: /Users/henrywhite/Developer/world-cup-trading-agent/ml/data/processed/statsbomb_next_goal_none.csv

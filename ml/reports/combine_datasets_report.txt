@@ -1,0 +1,4 @@
+txline: 13 fixture(s), 89 row(s), label balance 19 none / 70 goal (21.3% none)
+statsbomb: 64 fixture(s), 448 row(s), label balance 130 none / 318 goal (29.0% none)
+combined: 77 fixture(s), 537 row(s), label balance 149 none / 388 goal (27.7% none)
+Output: /Users/henrywhite/Developer/world-cup-trading-agent/ml/data/processed/next_goal_none_combined.csv
