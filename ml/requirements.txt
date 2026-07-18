@@ -1,0 +1,13 @@
+# download_replay.py uses only the Python standard library (urllib) for
+# HTTP, so no request library is required. python-dotenv is optional --
+# download_replay.py works without it (falls back to already-exported
+# environment variables) but will auto-load a local .env if present.
+python-dotenv>=1.0
+
+# build_dataset.py currently uses only the standard library (csv, json,
+# pathlib). pandas/scikit-learn are listed here for the next phase
+# (train.py/evaluate.py model fitting) and are already present in ml/.venv.
+pandas>=2.3
+numpy>=2.0
+scikit-learn>=1.6
+joblib>=1.5

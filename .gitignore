@@ -40,3 +40,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.venv/
+ml/models/*.joblib
+
+# downloaded TxLINE vendor data -- proprietary, re-downloadable on demand
+ml/data/raw/*
+!ml/data/raw/.gitkeep
