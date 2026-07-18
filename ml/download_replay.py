@@ -113,12 +113,14 @@ Credential handling:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
 import sys
 import time
 import urllib.error
 import urllib.request
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -134,6 +136,8 @@ DEFAULT_BASE_URL = "https://txline.txodds.com"
 REQUEST_TIMEOUT_S = 15
 ODDS_INTERVAL_SECONDS = 300  # 5 minutes, per the spec's {interval} path segment
 RAW_DIR = Path(__file__).resolve().parent / "data" / "raw"
+REPORTS_DIR = Path(__file__).resolve().parent / "reports"
+WORLD_CUP_TRACKER_PATH = REPORTS_DIR / "world_cup_fixture_download_tracker.csv"
 
 
 class TxLineConfigError(Exception):
@@ -857,6 +861,359 @@ def download_scores_historical(
     }
 
 
+# ---------------------------------------------------------------------------
+# Resumable World Cup batch replay downloader (--download-world-cup-range)
+#
+# Built entirely on top of what's already above: list_fixtures_for_date()
+# for discovery, download_scores_historical() (SSE/JSON/bucket-fallback) for
+# each fixture's score replay, get_odds_updates_for_window() for odds. This
+# section adds World-Cup filtering, per-fixture StartTime-based windowing,
+# resumability (skip fixtures that already have a non-empty
+# scores_historical.json on disk), a persistent CSV tracker, and duplicate-
+# fixture detection. Nothing above this section is modified.
+# ---------------------------------------------------------------------------
+
+TRACKER_CSV_COLUMNS = [
+    "fixture_id",
+    "start_utc",
+    "home",
+    "away",
+    "competition",
+    "download_status",
+    "score_update_count",
+    "error",
+    "potential_duplicate",
+]
+
+ALLOWED_DOWNLOAD_STATUSES = {
+    "downloaded",
+    "skipped_existing",
+    "empty_replay",
+    "failed",
+    "too_recent",
+    "upcoming",
+    "deferred",
+}
+
+WORLD_CUP_COMPETITION_NAME = "World Cup"
+WORLD_CUP_DOWNLOAD_WINDOW_HOURS = 3  # requirement 4: end time = StartTime + 3 hours
+DUPLICATE_KICKOFF_WINDOW_HOURS = 6  # requirement 14
+DEFAULT_FIXTURE_DELAY_S = 1.0  # requirement 16: default one-second delay
+
+
+def _enumerate_utc_dates(start_date: datetime, end_date: datetime) -> list[datetime]:
+    """Every UTC date in [start_date, end_date] inclusive, as UTC-midnight
+    datetimes (both arguments are expected already UTC-midnight, e.g. from
+    _parse_utc_date()). Requirement 1."""
+    if end_date < start_date:
+        raise ValueError("--end-date must be on or after --start-date")
+    dates = []
+    cursor = start_date
+    while cursor <= end_date:
+        dates.append(cursor)
+        cursor += timedelta(days=1)
+    return dates
+
+
+def _is_world_cup(fixture: dict) -> bool:
+    return fixture.get("competition") == WORLD_CUP_COMPETITION_NAME
+
+
+def discover_world_cup_fixtures(auth: TxLineAuth, start_date: datetime, end_date: datetime) -> list[dict]:
+    """Requirements 1-3: for every UTC date in [start_date, end_date]
+    inclusive, reuse list_fixtures_for_date() (the same
+    fixture-snapshot/startEpochDay logic --list-fixtures-for-date uses,
+    untouched) and filter to competition == "World Cup". Deduplicates by
+    fixture_id (in case a boundary fixture is returned by more than one
+    date's query) and returns fixtures sorted chronologically."""
+    by_id: dict = {}
+    for date in _enumerate_utc_dates(start_date, end_date):
+        for fx in list_fixtures_for_date(auth, date):
+            if not _is_world_cup(fx):
+                continue
+            by_id[fx["fixture_id"]] = fx
+    return sorted(by_id.values(), key=lambda r: r["start_utc"])
+
+
+def _pre_request_status(start_utc: datetime, now: datetime) -> str | None:
+    """Requirements 9-11: None means "attempt this fixture"; otherwise
+    "upcoming" (kickoff in the future) or "too_recent" (kickoff under 6
+    hours ago). Unlike _replay_status(), there is deliberately no "too
+    old" pre-emptive skip here -- older fixtures are still attempted once
+    even if likely outside the documented two-week window (requirement
+    11); the real, definitive answer to "is this too old" is whatever the
+    live download attempt itself reports, not a client-side guess."""
+    if start_utc > now:
+        return "upcoming"
+    if now - start_utc < timedelta(hours=6):
+        return "too_recent"
+    return None
+
+
+def _existing_score_update_count(scores_path: Path) -> int | None:
+    """None if the file doesn't exist or isn't parseable as a JSON array;
+    otherwise the number of records in it (which may legitimately be 0 --
+    an empty-but-present replay file, which requirement 8 says must NOT
+    count as a successful download and must be retried)."""
+    if not scores_path.exists():
+        return None
+    try:
+        data = json.loads(scores_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(data, list):
+        return None
+    return len(data)
+
+
+def _tracker_row(
+    fixture_id,
+    start_utc: datetime,
+    home: str | None,
+    away: str | None,
+    competition: str | None,
+    download_status: str,
+    score_update_count: int | None,
+    error: str | None,
+) -> dict:
+    assert download_status in ALLOWED_DOWNLOAD_STATUSES, download_status
+    return {
+        "fixture_id": fixture_id,
+        "start_utc": start_utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "home": home or "",
+        "away": away or "",
+        "competition": competition or "",
+        "download_status": download_status,
+        "score_update_count": "" if score_update_count is None else score_update_count,
+        "error": error or "",
+        "potential_duplicate": "false",  # refreshed by apply_duplicate_flags() before saving
+    }
+
+
+def detect_potential_duplicates(fixtures: list[dict]) -> set:
+    """Requirement 14: same (home, away) team pair, kickoff within 6 hours,
+    different fixture_id. Symmetric (flagging is mutual) and purely
+    informational -- never deletes or skips either fixture. `fixtures`
+    items need fixture_id/home/away/start_utc, with start_utc a real
+    datetime (not a string)."""
+    flagged = set()
+    for i, a in enumerate(fixtures):
+        for b in fixtures[i + 1 :]:
+            if a["fixture_id"] == b["fixture_id"]:
+                continue
+            if a.get("home") != b.get("home") or a.get("away") != b.get("away"):
+                continue
+            if abs(a["start_utc"] - b["start_utc"]) <= timedelta(hours=DUPLICATE_KICKOFF_WINDOW_HOURS):
+                flagged.add(a["fixture_id"])
+                flagged.add(b["fixture_id"])
+    return flagged
+
+
+def load_tracker_rows(path: Path) -> dict:
+    """fixture_id (int) -> row dict (strings, as read back from CSV).
+    Empty dict if the tracker doesn't exist yet -- this is how
+    "create or update" (requirement 13) and resumability work: a fresh
+    run starts from whatever the last run already recorded."""
+    if not path.exists():
+        return {}
+    with path.open(newline="") as f:
+        rows = list(csv.DictReader(f))
+    return {int(r["fixture_id"]): r for r in rows if r.get("fixture_id")}
+
+
+def save_tracker_rows(path: Path, rows_by_id: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    ordered = sorted(rows_by_id.values(), key=lambda r: r["start_utc"])
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=TRACKER_CSV_COLUMNS)
+        writer.writeheader()
+        writer.writerows(ordered)
+
+
+def download_world_cup_fixtures(
+    auth: TxLineAuth,
+    fixtures: list[dict],
+    out_dir: Path,
+    scores_only: bool,
+    delay_between_fixtures: float,
+    max_fixtures: int | None,
+    existing_rows: dict | None = None,
+    retry_empty: bool = False,
+    now: datetime | None = None,
+) -> list[dict]:
+    """The per-fixture loop. `fixtures` is already the full
+    World-Cup-filtered, chronologically-sorted list for this date range
+    (see discover_world_cup_fixtures()) -- EVERY one of them always gets a
+    progress line and a tracker row (requirement 1), regardless of
+    `max_fixtures`. `max_fixtures` (if given) caps how many fixtures
+    actually get a live download *attempt* (a real network request):
+    fixtures resolved as upcoming/too_recent/skipped_existing/(previously)
+    empty_replay don't consume that budget. Once the budget is spent,
+    remaining fixtures that would otherwise need an attempt are recorded
+    as "deferred" (requirement 2/3) -- not silently dropped -- so a normal
+    rerun makes forward progress into them instead of stalling.
+
+    `existing_rows` (fixture_id -> prior tracker row, from load_tracker_rows())
+    is how requirement 4 works: a fixture the tracker already has marked
+    "empty_replay" is *not* re-attempted on a normal rerun -- it costs a
+    real network request to learn "still empty" and that's exactly the
+    kind of repeated work resumability is supposed to avoid. Pass
+    `retry_empty=True` (--retry-empty) to force those fixtures to be
+    attempted again.
+
+    Continues past individual failures or empty responses (requirement 12)
+    rather than aborting the batch. Never prints or stores the guest
+    JWT/API token (requirement 17) -- only auth_headers(auth) ever touches
+    those, and TxLineRequestError messages are already sanitized at the
+    source (see _raise_for_status()).
+    """
+    now = now or datetime.now(timezone.utc)
+    existing_rows = existing_rows or {}
+    total = len(fixtures)
+    results: list[dict] = []
+    attempted = 0
+
+    for i, fx in enumerate(fixtures, start=1):
+        fixture_id = fx["fixture_id"]
+        start_utc = fx["start_utc"]
+        home = fx.get("home") or ""
+        away = fx.get("away") or ""
+        competition = fx.get("competition") or ""
+
+        print(f"[{i}/{total}] Checking fixture {fixture_id}: {home} vs {away}")
+
+        pre_status = _pre_request_status(start_utc, now)
+        if pre_status is not None:
+            print(pre_status)
+            results.append(_tracker_row(fixture_id, start_utc, home, away, competition, pre_status, None, None))
+            continue
+
+        fixture_dir = out_dir / str(fixture_id)
+        scores_path = fixture_dir / "scores_historical.json"
+        existing_count = _existing_score_update_count(scores_path)
+        if existing_count is not None and existing_count > 0:
+            print(f"skipped_existing: {existing_count:,} score updates already on disk")
+            results.append(
+                _tracker_row(fixture_id, start_utc, home, away, competition, "skipped_existing", existing_count, None)
+            )
+            continue
+
+        previous_row = existing_rows.get(fixture_id)
+        previously_empty = previous_row is not None and previous_row.get("download_status") == "empty_replay"
+        if previously_empty and not retry_empty:
+            print("empty_replay: previously downloaded with zero score updates (pass --retry-empty to retry)")
+            results.append(
+                _tracker_row(fixture_id, start_utc, home, away, competition, "empty_replay", 0, None)
+            )
+            continue
+
+        if max_fixtures is not None and attempted >= max_fixtures:
+            print(f"deferred: --max-fixtures {max_fixtures} reached this run")
+            results.append(_tracker_row(fixture_id, start_utc, home, away, competition, "deferred", None, None))
+            continue
+
+        attempted += 1
+        end_utc = start_utc + timedelta(hours=WORLD_CUP_DOWNLOAD_WINDOW_HOURS)
+        try:
+            score_result = download_scores_historical(
+                auth,
+                fixture_id,
+                start_utc,
+                end_utc,
+                max_requests=DEFAULT_MAX_DISCOVERY_REQUESTS,
+                delay_between_requests=DEFAULT_DISCOVERY_REQUEST_DELAY_S,
+            )
+            scores = score_result["scores"]
+            fixture_dir.mkdir(parents=True, exist_ok=True)
+            scores_path.write_text(json.dumps(scores, indent=2))
+
+            if not scores_only:
+                odds_entries = get_odds_updates_for_window(auth, fixture_id, start_utc, end_utc)
+                (fixture_dir / "odds_updates.json").write_text(json.dumps(odds_entries, indent=2))
+
+            if scores:
+                print(f"downloaded: {len(scores):,} score updates")
+                status = "downloaded"
+            else:
+                print("empty_replay: 0 score updates")
+                status = "empty_replay"
+            results.append(_tracker_row(fixture_id, start_utc, home, away, competition, status, len(scores), None))
+        except Exception as exc:  # noqa: BLE001 -- requirement 12: continue past *any* individual failure
+            print(f"failed: {exc}")
+            results.append(_tracker_row(fixture_id, start_utc, home, away, competition, "failed", None, str(exc)))
+
+        if delay_between_fixtures > 0:
+            time.sleep(delay_between_fixtures)
+
+    return results
+
+
+def run_world_cup_range_download(
+    auth: TxLineAuth,
+    start_date: datetime,
+    end_date: datetime,
+    out_dir: Path,
+    tracker_path: Path,
+    scores_only: bool,
+    delay_between_fixtures: float,
+    max_fixtures: int | None,
+    retry_empty: bool = False,
+    now: datetime | None = None,
+) -> dict:
+    """Top-level orchestration: discover -> detect duplicates (across both
+    this run's discovered fixtures and whatever's already in the tracker
+    from prior runs) -> download (resumable: existing_rows lets
+    download_world_cup_fixtures() see prior-run empty_replay fixtures and
+    skip re-attempting them unless retry_empty=True) -> merge into the
+    persistent tracker CSV ("create or update", never a blind overwrite --
+    rows for fixtures not touched this run are carried forward unchanged
+    except for a refreshed potential_duplicate flag). Every fixture
+    discover_world_cup_fixtures() finds always ends up with exactly one
+    row in the saved tracker (requirement 1/8)."""
+    now = now or datetime.now(timezone.utc)
+
+    discovered = discover_world_cup_fixtures(auth, start_date, end_date)
+    existing_rows = load_tracker_rows(tracker_path)
+
+    known_by_id = {
+        fx["fixture_id"]: {"fixture_id": fx["fixture_id"], "start_utc": fx["start_utc"], "home": fx.get("home"), "away": fx.get("away")}
+        for fx in discovered
+    }
+    for fixture_id, row in existing_rows.items():
+        if fixture_id not in known_by_id:
+            known_by_id[fixture_id] = {
+                "fixture_id": fixture_id,
+                "start_utc": _parse_utc(row["start_utc"]),
+                "home": row.get("home"),
+                "away": row.get("away"),
+            }
+    duplicate_ids = detect_potential_duplicates(list(known_by_id.values()))
+
+    results = download_world_cup_fixtures(
+        auth,
+        discovered,
+        out_dir=out_dir,
+        scores_only=scores_only,
+        delay_between_fixtures=delay_between_fixtures,
+        max_fixtures=max_fixtures,
+        existing_rows=existing_rows,
+        retry_empty=retry_empty,
+        now=now,
+    )
+
+    merged = dict(existing_rows)
+    for fixture_id in merged:
+        merged[fixture_id] = dict(merged[fixture_id])
+        merged[fixture_id]["potential_duplicate"] = "true" if fixture_id in duplicate_ids else "false"
+    for row in results:
+        row = dict(row)
+        row["potential_duplicate"] = "true" if row["fixture_id"] in duplicate_ids else "false"
+        merged[row["fixture_id"]] = row
+
+    save_tracker_rows(tracker_path, merged)
+    return {"discovered": discovered, "results": results, "duplicate_ids": duplicate_ids, "tracker_path": tracker_path}
+
+
 def _parse_utc(value: str) -> datetime:
     dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if dt.tzinfo is None:
@@ -931,6 +1288,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "result is not proof no fixtures existed that day."
         ),
     )
+    listing_group.add_argument(
+        "--download-world-cup-range",
+        action="store_true",
+        help=(
+            "Resumable batch downloader: for every UTC date in --start-date/--end-date "
+            "(inclusive), find fixtures via the same fixture-snapshot/startEpochDay logic "
+            "--list-fixtures-for-date uses, filter to competition == \"World Cup\", and "
+            "download each one's historical replay (scores_historical.json, and unless "
+            "--scores-only, odds_updates.json) using the same SSE/JSON/bucket-fallback "
+            "downloader the single-fixture path uses -- download window is each fixture's own "
+            "StartTime to StartTime + 3 hours. Creates/updates "
+            "ml/reports/world_cup_fixture_download_tracker.csv. A fixture with a non-empty "
+            "existing scores_historical.json is skipped (an empty one is retried), so "
+            "re-running the same command is always safe and makes forward progress. Requires "
+            "--start-date/--end-date. Ignores --fixture-id/--start/--end."
+        ),
+    )
     parser.add_argument(
         "--start-date",
         type=str,
@@ -976,6 +1350,40 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             f"Seconds to sleep between --discover-historical-fixtures interval requests "
             f"(default: {DEFAULT_DISCOVERY_REQUEST_DELAY_S})."
+        ),
+    )
+    parser.add_argument(
+        "--scores-only",
+        action="store_true",
+        help="With --download-world-cup-range: download scores_historical.json only, never request odds buckets.",
+    )
+    parser.add_argument(
+        "--delay-between-fixtures",
+        type=float,
+        default=DEFAULT_FIXTURE_DELAY_S,
+        help=(
+            "With --download-world-cup-range: seconds to sleep between fixtures "
+            f"(default: {DEFAULT_FIXTURE_DELAY_S})."
+        ),
+    )
+    parser.add_argument(
+        "--max-fixtures",
+        type=int,
+        default=None,
+        help=(
+            "With --download-world-cup-range: cap on how many fixtures get an actual download "
+            "attempt this run (skipped-existing/upcoming/too-recent/previously-empty fixtures "
+            "don't count against this) -- omit for no cap. Fixtures beyond the cap are recorded "
+            "as 'deferred' (not silently dropped); re-running the same command progresses into them."
+        ),
+    )
+    parser.add_argument(
+        "--retry-empty",
+        action="store_true",
+        help=(
+            "With --download-world-cup-range: also re-attempt fixtures the tracker already has "
+            "marked empty_replay (by default these are left alone on a normal rerun, since "
+            "re-downloading them just to learn 'still empty' wastes a request)."
         ),
     )
     parser.add_argument(
@@ -1037,6 +1445,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             parser.error(f"the following arguments are required: {', '.join(missing)}")
     elif args.list_fixtures_for_date is not None:
         pass
+    elif args.download_world_cup_range:
+        missing = [
+            name
+            for name, value in (("--start-date", args.start_date), ("--end-date", args.end_date))
+            if value is None
+        ]
+        if missing:
+            parser.error(f"the following arguments are required: {', '.join(missing)}")
     elif not (args.list_eligible_fixtures or args.list_all_fixtures):
         missing = [
             name
@@ -1188,6 +1604,62 @@ def main(argv: list[str] | None = None) -> int:
             )
         return 0
 
+    if args.download_world_cup_range:
+        try:
+            start_date = _parse_utc_date(args.start_date)
+            end_date = _parse_utc_date(args.end_date)
+        except ValueError as exc:
+            print(f"error: invalid --start-date/--end-date: {exc}", file=sys.stderr)
+            return 2
+
+        try:
+            dates = _enumerate_utc_dates(start_date, end_date)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+
+        print(
+            f"Scanning {len(dates)} UTC date(s) from {args.start_date} to {args.end_date} "
+            f"for {WORLD_CUP_COMPETITION_NAME!r} fixtures ..."
+        )
+
+        try:
+            guest_token = start_guest_session()
+            auth = TxLineAuth(guest_token=guest_token, api_token=api_token)
+            outcome = run_world_cup_range_download(
+                auth,
+                start_date,
+                end_date,
+                out_dir=args.out_dir,
+                tracker_path=WORLD_CUP_TRACKER_PATH,
+                scores_only=args.scores_only,
+                delay_between_fixtures=args.delay_between_fixtures,
+                max_fixtures=args.max_fixtures,
+                retry_empty=args.retry_empty,
+            )
+        except (TxLineRequestError, TxLineConfigError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+
+        discovered = outcome["discovered"]
+        results = outcome["results"]
+        status_counts = Counter(r["download_status"] for r in results)
+        print(f"\nTotal discovered: {len(discovered)} {WORLD_CUP_COMPETITION_NAME!r} fixture(s) in range.")
+        for status in (
+            "downloaded",
+            "skipped_existing",
+            "empty_replay",
+            "failed",
+            "upcoming",
+            "too_recent",
+            "deferred",
+        ):
+            print(f"  {status}: {status_counts.get(status, 0)}")
+        if outcome["duplicate_ids"]:
+            print(f"  potential duplicates flagged: {sorted(outcome['duplicate_ids'])}")
+        print(f"\nTracker saved -> {outcome['tracker_path']}")
+        return 0
+
     if args.list_all_fixtures:
         try:
             guest_token = start_guest_session()
@@ -1300,15 +1772,23 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_self_tests() -> int:
-    global get_scores_updates_for_interval, _request_raw  # monkeypatched per-test below, restored in finally
+    # monkeypatched per-test below, restored in finally
+    global get_scores_updates_for_interval, _request_raw
+    global list_fixtures_for_date, download_scores_historical, get_odds_updates_for_window
 
     original_get_scores_updates_for_interval = get_scores_updates_for_interval
     original_request_raw = _request_raw
+    original_list_fixtures_for_date = list_fixtures_for_date
+    original_download_scores_historical = download_scores_historical
+    original_get_odds_updates_for_window = get_odds_updates_for_window
     try:
         _run_self_tests_body()
     finally:
         get_scores_updates_for_interval = original_get_scores_updates_for_interval
         _request_raw = original_request_raw
+        list_fixtures_for_date = original_list_fixtures_for_date
+        download_scores_historical = original_download_scores_historical
+        get_odds_updates_for_window = original_get_odds_updates_for_window
 
     print("All self-tests passed.")
     return 0
@@ -1316,6 +1796,7 @@ def _run_self_tests() -> int:
 
 def _run_self_tests_body() -> None:
     global get_scores_updates_for_interval, _request_raw
+    global list_fixtures_for_date, download_scores_historical, get_odds_updates_for_window
 
     # 1. epochDay calculation -- days since the Unix epoch for a known UTC instant.
     known = datetime(2024, 1, 1, 0, 0, tzinfo=timezone.utc)
@@ -1745,6 +2226,369 @@ def _run_self_tests_body() -> None:
         except TxLineRequestError as exc:
             assert exc.status == status, exc.status
         assert tracking_state["calls"] == [], f"no bucket-scan requests should be made on {status}"
+
+    # -- --download-world-cup-range: resumable World Cup batch downloader --
+    import tempfile
+
+    wc_now = datetime(2026, 7, 1, 12, 0, tzinfo=timezone.utc)
+
+    # 1. Date enumeration: inclusive range, one entry per UTC day.
+    enumerated = _enumerate_utc_dates(
+        datetime(2026, 6, 11, tzinfo=timezone.utc), datetime(2026, 6, 13, tzinfo=timezone.utc)
+    )
+    assert enumerated == [
+        datetime(2026, 6, 11, tzinfo=timezone.utc),
+        datetime(2026, 6, 12, tzinfo=timezone.utc),
+        datetime(2026, 6, 13, tzinfo=timezone.utc),
+    ], enumerated
+    assert _enumerate_utc_dates(datetime(2026, 6, 11, tzinfo=timezone.utc), datetime(2026, 6, 11, tzinfo=timezone.utc)) == [
+        datetime(2026, 6, 11, tzinfo=timezone.utc)
+    ]
+    try:
+        _enumerate_utc_dates(datetime(2026, 6, 12, tzinfo=timezone.utc), datetime(2026, 6, 11, tzinfo=timezone.utc))
+        raise AssertionError("_enumerate_utc_dates should reject end_date before start_date")
+    except ValueError:
+        pass
+
+    # 2. World Cup filtering: discover_world_cup_fixtures() only keeps
+    # competition == "World Cup", across a multi-date range, deduplicated
+    # and sorted chronologically -- fed by a fake list_fixtures_for_date()
+    # standing in for the real fixture-snapshot/startEpochDay call.
+    wc_fixtures_by_date = {
+        datetime(2026, 6, 11, tzinfo=timezone.utc): [
+            {"fixture_id": 1, "start_utc": datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc), "home": "A", "away": "B", "competition": "World Cup"},
+            {"fixture_id": 2, "start_utc": datetime(2026, 6, 11, 21, 0, tzinfo=timezone.utc), "home": "C", "away": "D", "competition": "Friendlies"},
+        ],
+        datetime(2026, 6, 12, tzinfo=timezone.utc): [
+            {"fixture_id": 3, "start_utc": datetime(2026, 6, 12, 15, 0, tzinfo=timezone.utc), "home": "E", "away": "F", "competition": "World Cup"},
+        ],
+    }
+
+    def fake_list_fixtures_for_date(auth, date_utc):
+        return wc_fixtures_by_date.get(date_utc, [])
+
+    list_fixtures_for_date = fake_list_fixtures_for_date
+    wc_discovered = discover_world_cup_fixtures(
+        fake_auth, datetime(2026, 6, 11, tzinfo=timezone.utc), datetime(2026, 6, 12, tzinfo=timezone.utc)
+    )
+    assert [f["fixture_id"] for f in wc_discovered] == [1, 3], wc_discovered  # fixture 2 (Friendlies) excluded
+    assert all(f["competition"] == "World Cup" for f in wc_discovered)
+
+    # 5. Upcoming and too-recent skipping (pure function).
+    assert _pre_request_status(wc_now + timedelta(days=1), wc_now) == "upcoming"
+    assert _pre_request_status(wc_now - timedelta(hours=1), wc_now) == "too_recent"
+    assert _pre_request_status(wc_now - timedelta(hours=6), wc_now) is None  # exactly 6h -- attempt it
+    assert _pre_request_status(wc_now - timedelta(days=30), wc_now) is None  # older than 2wk -- still attempted (11)
+
+    # 3/4. Existing non-empty replay skipping / existing empty replay
+    # retrying (pure function + real temp files).
+    tmp_root = Path(tempfile.mkdtemp())
+    non_empty_dir = tmp_root / "10"
+    non_empty_dir.mkdir()
+    (non_empty_dir / "scores_historical.json").write_text(json.dumps([{"FixtureId": 10, "Seq": 1, "Ts": 1}]))
+    assert _existing_score_update_count(non_empty_dir / "scores_historical.json") == 1
+
+    empty_dir = tmp_root / "11"
+    empty_dir.mkdir()
+    (empty_dir / "scores_historical.json").write_text(json.dumps([]))
+    assert _existing_score_update_count(empty_dir / "scores_historical.json") == 0  # present but empty -> not "valid"
+
+    missing_dir = tmp_root / "12"
+    assert _existing_score_update_count(missing_dir / "scores_historical.json") is None
+
+    # 8. Duplicate detection: same (home, away), kickoff within 6h, distinct
+    # fixture_id -> flagged both ways; > 6h apart or different teams -> not.
+    dup_fixtures = [
+        {"fixture_id": 101, "start_utc": datetime(2026, 6, 11, 18, 0, tzinfo=timezone.utc), "home": "A", "away": "B"},
+        {"fixture_id": 102, "start_utc": datetime(2026, 6, 11, 20, 0, tzinfo=timezone.utc), "home": "A", "away": "B"},  # 2h later, same teams -> duplicate
+        {"fixture_id": 103, "start_utc": datetime(2026, 6, 12, 18, 0, tzinfo=timezone.utc), "home": "A", "away": "B"},  # 24h later -> not a duplicate
+        {"fixture_id": 104, "start_utc": datetime(2026, 6, 11, 18, 30, tzinfo=timezone.utc), "home": "C", "away": "D"},  # different teams -> not a duplicate
+    ]
+    duplicate_ids = detect_potential_duplicates(dup_fixtures)
+    assert duplicate_ids == {101, 102}, duplicate_ids
+
+    # Full download_world_cup_fixtures()/run_world_cup_range_download()
+    # integration, via monkeypatched download_scores_historical() /
+    # get_odds_updates_for_window() -- items 6 (empty replay tracking),
+    # 7 (individual failure continuation), 9 (scores-only preventing odds
+    # calls), 10 (max-fixtures limiting).
+    out_dir = Path(tempfile.mkdtemp())
+    batch_fixtures = [
+        {"fixture_id": 201, "start_utc": wc_now - timedelta(days=3), "home": "Team A", "away": "Team B", "competition": "World Cup"},
+        {"fixture_id": 202, "start_utc": wc_now - timedelta(days=2), "home": "Team C", "away": "Team D", "competition": "World Cup"},
+        {"fixture_id": 203, "start_utc": wc_now - timedelta(days=1), "home": "Team E", "away": "Team F", "competition": "World Cup"},
+        {"fixture_id": 204, "start_utc": wc_now + timedelta(hours=2), "home": "Team G", "away": "Team H", "competition": "World Cup"},  # upcoming
+        {"fixture_id": 205, "start_utc": wc_now - timedelta(hours=1), "home": "Team I", "away": "Team J", "competition": "World Cup"},  # too_recent
+    ]
+    # 201 -> empty replay (0 scores, not an exception); 202 -> raises (failed,
+    # loop must continue to 203+); 203 -> real records.
+    odds_call_log: list[int] = []
+
+    def fake_download_scores_historical(auth, fixture_id, start, end, max_requests, delay_between_requests):
+        if fixture_id == 201:
+            return {"scores": [], "source": "sse", "buckets_queried": None, "primary_error": None}
+        if fixture_id == 202:
+            raise TxLineRequestError("simulated failure for fixture 202", status=500)
+        return {
+            "scores": [{"FixtureId": fixture_id, "Seq": 1, "Ts": 1}, {"FixtureId": fixture_id, "Seq": 2, "Ts": 2}],
+            "source": "sse",
+            "buckets_queried": None,
+            "primary_error": None,
+        }
+
+    def fake_get_odds_updates_for_window(auth, fixture_id, start, end):
+        odds_call_log.append(fixture_id)
+        return []
+
+    download_scores_historical = fake_download_scores_historical
+    get_odds_updates_for_window = fake_get_odds_updates_for_window
+
+    results = download_world_cup_fixtures(
+        fake_auth,
+        batch_fixtures,
+        out_dir=out_dir,
+        scores_only=True,  # 9: scores-only -- odds must never be requested
+        delay_between_fixtures=0,
+        max_fixtures=None,
+        now=wc_now,
+    )
+    results_by_id = {r["fixture_id"]: r for r in results}
+    assert results_by_id[201]["download_status"] == "empty_replay", results_by_id[201]  # 6
+    assert results_by_id[201]["score_update_count"] == 0
+    assert results_by_id[202]["download_status"] == "failed", results_by_id[202]  # 7
+    assert "simulated failure" in results_by_id[202]["error"]
+    assert results_by_id[203]["download_status"] == "downloaded", results_by_id[203]  # loop continued past 202
+    assert results_by_id[203]["score_update_count"] == 2
+    assert results_by_id[204]["download_status"] == "upcoming", results_by_id[204]
+    assert results_by_id[205]["download_status"] == "too_recent", results_by_id[205]
+    assert odds_call_log == [], "scores_only=True must never call get_odds_updates_for_window"  # 9
+    assert not (out_dir / "201" / "odds_updates.json").exists()
+    assert (out_dir / "203" / "scores_historical.json").exists()
+
+    # Re-running with scores_only=False must request odds for newly-downloaded
+    # fixtures (203 already has a non-empty file now, so it's skipped instead
+    # -- confirms 3/4 through the full loop, not just the pure function).
+    odds_call_log.clear()
+    results2 = download_world_cup_fixtures(
+        fake_auth, batch_fixtures, out_dir=out_dir, scores_only=False, delay_between_fixtures=0, max_fixtures=None, now=wc_now
+    )
+    results2_by_id = {r["fixture_id"]: r for r in results2}
+    assert results2_by_id[203]["download_status"] == "skipped_existing", results2_by_id[203]  # 3
+    assert results2_by_id[201]["download_status"] == "empty_replay", results2_by_id[201]  # 4: empty file retried, not skipped
+    assert 203 not in odds_call_log  # skipped fixtures never trigger an odds request
+    assert 201 in odds_call_log  # retried (and re-attempted) fixtures do, since scores_only=False here
+
+    # 10 (fix regression). max-fixtures limiting: only fixtures that need
+    # an actual download attempt count against the cap -- skipped/upcoming/
+    # too_recent don't -- but EVERY discovered fixture must still get a row
+    # (requirement 1), and one beyond the cap is "deferred", never silently
+    # dropped (requirement 2/3). This reproduces the original bug report:
+    # 105 discovered fixtures collapsing to 19 tracker rows because capped
+    # fixtures got no row at all -- see the full 105-fixture regression
+    # test further down for the exact real-world scenario.
+    call_count = {"n": 0}
+
+    def counting_download_scores_historical(auth, fixture_id, start, end, max_requests, delay_between_requests):
+        call_count["n"] += 1
+        return {"scores": [{"FixtureId": fixture_id, "Seq": 1, "Ts": 1}], "source": "sse", "buckets_queried": None, "primary_error": None}
+
+    download_scores_historical = counting_download_scores_historical
+    out_dir_capped = Path(tempfile.mkdtemp())
+    (out_dir_capped / "203").mkdir()
+    (out_dir_capped / "203" / "scores_historical.json").write_text(json.dumps([{"FixtureId": 203, "Seq": 1, "Ts": 1}]))
+    results3 = download_world_cup_fixtures(
+        fake_auth, batch_fixtures, out_dir=out_dir_capped, scores_only=True, delay_between_fixtures=0, max_fixtures=1, now=wc_now
+    )
+    assert call_count["n"] == 1, call_count  # only one real download attempt made
+    results3_by_id = {r["fixture_id"]: r for r in results3}
+    assert set(results3_by_id) == {201, 202, 203, 204, 205}, set(results3_by_id)  # requirement 1: ALL fixtures get a row
+    assert results3_by_id[201]["download_status"] == "downloaded", results3_by_id[201]  # consumed the one-fixture budget
+    assert results3_by_id[202]["download_status"] == "deferred", results3_by_id[202]  # requirement 2/3: deferred, not dropped
+    assert results3_by_id[202]["score_update_count"] == ""  # no attempt was made -- nothing to report
+    assert results3_by_id[203]["download_status"] == "skipped_existing"  # pre-existing file, doesn't consume budget
+    assert results3_by_id[204]["download_status"] == "upcoming"  # doesn't consume budget
+    assert results3_by_id[205]["download_status"] == "too_recent"  # doesn't consume budget
+
+    # Requirement 4/5: a fixture the tracker already has marked empty_replay
+    # is skipped on a normal rerun (existing_rows says so) -- no network
+    # call -- but IS re-attempted when retry_empty=True.
+    empty_call_log: list[int] = []
+
+    def counting_empty_download(auth, fixture_id, start, end, max_requests, delay_between_requests):
+        empty_call_log.append(fixture_id)
+        return {"scores": [], "source": "sse", "buckets_queried": None, "primary_error": None}
+
+    download_scores_historical = counting_empty_download
+    prior_tracker_rows = {
+        301: _tracker_row(301, wc_now - timedelta(days=1), "X", "Y", "World Cup", "empty_replay", 0, None)
+    }
+    fixture_301 = [{"fixture_id": 301, "start_utc": wc_now - timedelta(days=1), "home": "X", "away": "Y", "competition": "World Cup"}]
+
+    no_retry_results = download_world_cup_fixtures(
+        fake_auth,
+        fixture_301,
+        out_dir=Path(tempfile.mkdtemp()),
+        scores_only=True,
+        delay_between_fixtures=0,
+        max_fixtures=None,
+        existing_rows=prior_tracker_rows,
+        retry_empty=False,
+        now=wc_now,
+    )
+    assert empty_call_log == [], "a fixture already marked empty_replay must not be re-attempted without --retry-empty"
+    assert no_retry_results[0]["download_status"] == "empty_replay", no_retry_results[0]
+
+    retry_results = download_world_cup_fixtures(
+        fake_auth,
+        fixture_301,
+        out_dir=Path(tempfile.mkdtemp()),
+        scores_only=True,
+        delay_between_fixtures=0,
+        max_fixtures=None,
+        existing_rows=prior_tracker_rows,
+        retry_empty=True,
+        now=wc_now,
+    )
+    assert empty_call_log == [301], "--retry-empty must force a real re-attempt"
+    assert retry_results[0]["download_status"] == "empty_replay", retry_results[0]
+
+    # Requirement 8: tracker rows are unique by fixture_id even if the
+    # source data has overlapping/duplicate entries for the same fixture.
+    unique_tracker_path = Path(tempfile.mkdtemp()) / "tracker.csv"
+    save_tracker_rows(
+        unique_tracker_path,
+        {
+            401: _tracker_row(401, wc_now, "P", "Q", "World Cup", "downloaded", 5, None),
+        },
+    )
+    # Simulate a second save with a fresh row for the same fixture_id (as a
+    # rerun's merge would produce) -- must overwrite, not duplicate.
+    save_tracker_rows(
+        unique_tracker_path,
+        {401: _tracker_row(401, wc_now, "P", "Q", "World Cup", "skipped_existing", 5, None)},
+    )
+    with unique_tracker_path.open(newline="") as f:
+        saved_rows = list(csv.DictReader(f))
+    assert len(saved_rows) == 1, saved_rows
+    assert saved_rows[0]["fixture_id"] == "401" and saved_rows[0]["download_status"] == "skipped_existing"
+
+    # -- Full regression test reproducing the real reported case: 105
+    # discovered fixtures, 13 with an existing valid replay, --max-fixtures 5.
+    # All 105 must appear in the tracker; exactly 5 new network attempts;
+    # the remaining eligible fixtures are deferred; and a second run
+    # progresses past the first run's (now-empty) attempts rather than
+    # retrying them. --
+    regression_now = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+    regression_date = datetime(2026, 6, 20, tzinfo=timezone.utc)
+
+    def make_regression_fixture(fixture_id: int, start_utc: datetime) -> dict:
+        return {
+            "fixture_id": fixture_id,
+            "start_utc": start_utc,
+            "home": f"Home{fixture_id}",
+            "away": f"Away{fixture_id}",
+            "competition": "World Cup",
+        }
+
+    # 1-13: existing valid replay on disk -> skipped_existing.
+    # 14: upcoming (kickoff after regression_now).
+    # 15-105: no existing file, old enough to attempt (91 fixtures).
+    regression_fixtures = []
+    for fid in range(1, 14):
+        regression_fixtures.append(make_regression_fixture(fid, regression_now - timedelta(days=10, minutes=fid)))
+    regression_fixtures.append(make_regression_fixture(14, regression_now + timedelta(days=1)))
+    for fid in range(15, 106):
+        regression_fixtures.append(make_regression_fixture(fid, regression_now - timedelta(days=9, minutes=fid)))
+    assert len(regression_fixtures) == 105
+
+    def fake_list_fixtures_for_date_regression(auth, date_utc):
+        return regression_fixtures if date_utc == regression_date else []
+
+    list_fixtures_for_date = fake_list_fixtures_for_date_regression
+
+    regression_out_dir = Path(tempfile.mkdtemp())
+    for fid in range(1, 14):
+        fixture_dir = regression_out_dir / str(fid)
+        fixture_dir.mkdir()
+        (fixture_dir / "scores_historical.json").write_text(
+            json.dumps([{"FixtureId": fid, "Seq": 1, "Ts": 1}])
+        )
+
+    regression_attempts: list[int] = []
+
+    def regression_download_run1(auth, fixture_id, start, end, max_requests, delay_between_requests):
+        regression_attempts.append(fixture_id)
+        return {"scores": [], "source": "sse", "buckets_queried": None, "primary_error": None}  # every attempt comes back empty, like the real report
+
+    download_scores_historical = regression_download_run1
+    regression_tracker_path = Path(tempfile.mkdtemp()) / "world_cup_fixture_download_tracker.csv"
+
+    outcome1 = run_world_cup_range_download(
+        fake_auth,
+        regression_date,
+        regression_date,
+        out_dir=regression_out_dir,
+        tracker_path=regression_tracker_path,
+        scores_only=True,
+        delay_between_fixtures=0,
+        max_fixtures=5,
+        now=regression_now,
+    )
+    assert len(outcome1["discovered"]) == 105
+    with regression_tracker_path.open(newline="") as f:
+        run1_rows = list(csv.DictReader(f))
+    assert len(run1_rows) == 105, len(run1_rows)  # requirement 1: every discovered fixture is tracked
+    assert len({r["fixture_id"] for r in run1_rows}) == 105  # requirement 8: unique by fixture_id
+    run1_status_counts = Counter(r["download_status"] for r in run1_rows)
+    assert run1_status_counts["skipped_existing"] == 13, run1_status_counts
+    assert run1_status_counts["upcoming"] == 1, run1_status_counts
+    assert run1_status_counts["empty_replay"] == 5, run1_status_counts
+    assert run1_status_counts["deferred"] == 86, run1_status_counts  # 105 - 13 - 1 - 5
+    assert len(regression_attempts) == 5, regression_attempts  # exactly 5 new network attempts
+    first_run_attempted_ids = set(regression_attempts)
+
+    # Second run: same fixtures, same "now" -- must not re-attempt the 5
+    # fixtures just marked empty_replay, and must progress into (some of)
+    # the 86 deferred ones instead.
+    regression_attempts.clear()
+
+    def regression_download_run2(auth, fixture_id, start, end, max_requests, delay_between_requests):
+        regression_attempts.append(fixture_id)
+        return {
+            "scores": [{"FixtureId": fixture_id, "Seq": 1, "Ts": 1}],
+            "source": "sse",
+            "buckets_queried": None,
+            "primary_error": None,
+        }
+
+    download_scores_historical = regression_download_run2
+    outcome2 = run_world_cup_range_download(
+        fake_auth,
+        regression_date,
+        regression_date,
+        out_dir=regression_out_dir,
+        tracker_path=regression_tracker_path,
+        scores_only=True,
+        delay_between_fixtures=0,
+        max_fixtures=5,
+        now=regression_now,
+    )
+    assert len(regression_attempts) == 5, regression_attempts  # requirement 7: still exactly 5 *new* attempts
+    assert first_run_attempted_ids.isdisjoint(regression_attempts), (
+        "a normal rerun must not re-attempt fixtures already marked empty_replay",
+        first_run_attempted_ids,
+        regression_attempts,
+    )
+    with regression_tracker_path.open(newline="") as f:
+        run2_rows = list(csv.DictReader(f))
+    assert len(run2_rows) == 105, len(run2_rows)  # still every fixture tracked
+    assert len({r["fixture_id"] for r in run2_rows}) == 105  # still unique by fixture_id
+    run2_status_counts = Counter(r["download_status"] for r in run2_rows)
+    assert run2_status_counts["skipped_existing"] == 13, run2_status_counts
+    assert run2_status_counts["upcoming"] == 1, run2_status_counts
+    assert run2_status_counts["empty_replay"] == 5, run2_status_counts  # the first run's 5, carried forward unchanged
+    assert run2_status_counts["downloaded"] == 5, run2_status_counts  # 5 newly-attempted, now real records
+    assert run2_status_counts["deferred"] == 81, run2_status_counts  # 86 - 5 progressed this run
 
 
 if __name__ == "__main__":
