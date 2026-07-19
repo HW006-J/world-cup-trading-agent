@@ -81,6 +81,55 @@ export interface FactorExplanation {
 export type Signal = "BUY" | "PASS";
 export type ConfidenceLabel = "Low" | "Medium" | "High";
 
+/**
+ * Where an AnalysisResult's fairProbability came from. "trained_model" is
+ * only ever used for the nextGoal market's "none" selection, and only when
+ * the trained model's required live inputs were genuinely available (see
+ * lib/model/liveFeatureAdapter.ts). "heuristic_fallback" (lib/engine.ts,
+ * unchanged) is used for every other market/selection (matchWinner,
+ * overUnder, nextGoal/home, nextGoal/away) -- none of which the live TxLINE
+ * provider ever actually exposes (see lib/txline/marketRestriction.ts), so
+ * in production this value only ever appears in the demo/test provider path.
+ * A nextGoal/none case whose trained-model inputs are unavailable is never
+ * "heuristic_fallback" -- see UnavailableNextGoalNone below; no heuristic
+ * probability is ever substituted for a missing trained-model input.
+ */
+export type ProbabilitySource = "trained_model" | "heuristic_fallback";
+
+/**
+ * A nextGoal/none evaluation that could not run the trained model because
+ * one or more required live inputs weren't genuinely available this cycle
+ * (see lib/model/liveFeatureAdapter.ts's LiveFeatureResult). Deliberately not
+ * an AnalysisResult: there is no honest probability, edge, confidence, or
+ * signal to show when the model didn't run, so this carries only the
+ * missing-field list -- real-data-only rule: no heuristic probability may
+ * ever substitute for a missing trained-model input, and a caller must show
+ * a typed "unavailable" state naming exactly what's missing rather than a
+ * number.
+ */
+export interface UnavailableNextGoalNone {
+  marketId: "nextGoal";
+  selectionId: "none";
+  missingFields: string[];
+  /** Same optional human-readable note AnalysisResult.probabilityContextNote carries -- e.g. from goalHistoryTracker.describeGoalHistoryState -- explaining *why* (ambiguous transition, goals already on the board, etc). Undefined for callers that don't supply one. */
+  contextNote?: string;
+}
+
+/**
+ * The trained model's own two probabilities, exactly as ml/predict.py names
+ * them (see lib/model/nextGoalNoneModel.ts) -- only ever present when
+ * probabilitySource is "trained_model". Kept separate from fairProbability
+ * (which is clamped into the same 1%-98% band the heuristic path has
+ * always used, to keep the edge/confidence/signal math identical either
+ * way) so the UI can show the model's real output un-distorted by that
+ * trading-math clamp.
+ */
+export interface NextGoalNoneModelProbabilities {
+  model_name: string;
+  model_probability_next_goal_none: number;
+  model_probability_another_goal: number;
+}
+
 export interface AnalysisResult {
   marketId: MarketId;
   selectionId: string;
@@ -93,9 +142,42 @@ export interface AnalysisResult {
   confidenceLabel: ConfidenceLabel;
   signal: Signal;
   factors: FactorExplanation[];
+  probabilitySource: ProbabilitySource;
+  /** Only set when probabilitySource === "trained_model". */
+  modelProbabilities?: NextGoalNoneModelProbabilities;
+  /**
+   * Concise, human-readable context for nextGoal/none only, supplied by a
+   * caller that tracks live goal-history trust (see
+   * lib/monitoring/goalHistoryTracker.ts's describeGoalHistoryState) --
+   * either why the trained model is unavailable this cycle, or that an
+   * available prediction's timing came from an observed live score
+   * transition. Undefined for every other market/selection, and for
+   * Replay/demo callers that don't supply one.
+   */
+  probabilityContextNote?: string;
 }
 
 export type TradeStatus = "open" | "won" | "lost";
+
+/**
+ * Where a PaperTrade's fixture and odds genuinely came from. PitchEdge v1
+ * only ever creates a trade from a live TxLINE fixture with a real,
+ * currently-published nextGoal/none price and a trained-model prediction --
+ * see lib/trade.ts's buildPaperTrade() precondition and
+ * lib/scanner.ts/lib/model/. There is deliberately no "historical" or
+ * "demo" provenance value: historical analysis has no real market odds to
+ * trade against (see the historical-analysis mode), and demo data is never
+ * wired into a production trade at all.
+ */
+export interface PaperTradeProvenance {
+  /** The live provider's own fixture id (Match.id) this trade was opened against. */
+  fixtureId: string;
+  provider: "txline_live";
+  /** ISO timestamp of the live snapshot (ProviderMeta.asOf) the odds were read from. */
+  marketOddsAsOf: string;
+  /** Always "trained_model" -- a trade can only ever be created when the trained model's prediction was available. */
+  probabilitySource: "trained_model";
+}
 
 export interface PaperTrade {
   id: string;
@@ -113,6 +195,7 @@ export interface PaperTrade {
   status: TradeStatus;
   /** Realised profit/loss. Null while the trade is still open. */
   pnl: number | null;
+  provenance: PaperTradeProvenance;
 }
 
 /**

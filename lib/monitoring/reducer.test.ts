@@ -50,6 +50,7 @@ function makeOpportunity(
     confidenceLabel: "Medium",
     signal,
     factors: [],
+    probabilitySource: "heuristic_fallback",
   };
   return {
     marketId,
@@ -76,6 +77,7 @@ function makeScan(
     opportunities,
     best,
     closest: closest !== undefined ? closest : best,
+    unavailable: [],
   };
 }
 

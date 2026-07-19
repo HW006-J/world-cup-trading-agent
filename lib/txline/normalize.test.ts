@@ -1,14 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeFixture, normalizeOdds, normalizeScore } from "./normalize.ts";
+import { computeElapsedMinutes, normalizeFixture, normalizeOdds, normalizeScore } from "./normalize.ts";
 import type { RawFixture, RawOddsPayload, RawScoresEntry } from "./types.ts";
 
 // Shapes below follow the documented TxLINE OpenAPI schema (v1.5.6) for
 // Fixture, OddsPayload and Scores. Values are sanitized/synthetic.
 
+// Ts/StartTime are epoch milliseconds -- verified 2026-07-19 against a real
+// /api/fixtures/snapshot response (see scripts/txline-diagnostic.ts and
+// RawFixture's own field comments), not seconds despite the field names.
 const RAW_FIXTURE: RawFixture = {
-  Ts: 1_752_000_000,
-  StartTime: 1_752_600_000,
+  Ts: 1_752_000_000_000,
+  StartTime: 1_752_600_000_000,
   Competition: "World Cup",
   CompetitionId: 501,
   FixtureGroupId: 1,
@@ -26,7 +29,7 @@ test("normalizeFixture maps participants to home/away using Participant1IsHome",
   assert.equal(fixture.away.name, "France");
   assert.equal(fixture.txlineFixtureId, 987654);
   assert.equal(fixture.id, "txline-987654");
-  assert.equal(new Date(fixture.startTime).getTime(), 1_752_600_000 * 1000);
+  assert.equal(new Date(fixture.startTime).getTime(), 1_752_600_000_000);
 });
 
 test("normalizeFixture respects Participant1IsHome=false", () => {
@@ -195,4 +198,23 @@ test('normalizeScore maps the "NS" status code to upcoming and "END" to finished
   assert.equal(normalizeScore({ ...base, statusSoccerId: "NS" })?.status, "upcoming");
   assert.equal(normalizeScore({ ...base, statusSoccerId: "END" })?.status, "finished");
   assert.equal(normalizeScore({ ...base, statusSoccerId: "H1" })?.status, "live");
+});
+
+// --- minute is derived from real elapsed time, never left at a default ----
+
+test("computeElapsedMinutes derives real elapsed minutes from two real epoch-millisecond timestamps", () => {
+  const kickoffMs = 1_752_600_000_000;
+  // 63 minutes and 40 seconds after kickoff -- floors to 63, never rounds up.
+  const scoreTs = kickoffMs + 63 * 60_000 + 40_000;
+  assert.equal(computeElapsedMinutes(scoreTs, kickoffMs), 63);
+});
+
+test("computeElapsedMinutes never goes negative, even if the score timestamp precedes kickoff", () => {
+  const kickoffMs = 1_752_600_000_000;
+  assert.equal(computeElapsedMinutes(kickoffMs - 5_000, kickoffMs), 0);
+});
+
+test("computeElapsedMinutes is exactly zero at the instant of kickoff", () => {
+  const kickoffMs = 1_752_600_000_000;
+  assert.equal(computeElapsedMinutes(kickoffMs, kickoffMs), 0);
 });

@@ -1,17 +1,26 @@
-import modelExport from "../../ml/models/next_goal_none_logistic_v1.json" with { type: "json" };
+import modelJson from "../../ml/models/next_goal_none_logistic_v1.json" with { type: "json" };
 
 // ---------------------------------------------------------------------------
-// Henry's next_goal_none_logistic_v1 model -- pure TypeScript inference.
+// next_goal_none_logistic_v1 -- trained model, pure inference module
 //
-// This module owns nothing under ml/ -- it only *reads* the committed model
-// export (ml/models/next_goal_none_logistic_v1.json) and reimplements the
-// same standardize -> logit -> sigmoid arithmetic ml/predict.py uses, so a
-// PitchEdge (Next.js/browser) runtime never needs Python at request time.
-// The feature list, scaler and coefficients are never redefined here beyond
-// what's needed to validate the committed export matches expectations.
+// Loads the exact JSON exported by ml/train.py (scaler mean/scale, logistic
+// regression coefficients/intercept) and reimplements ml/predict.py's
+// calculation directly:
+//
+//   standardized[i] = (raw[i] - scaler_mean[i]) / scaler_scale[i]
+//   logit = intercept + sum(coefficients[i] * standardized[i])
+//   model_probability_next_goal_none = 1 / (1 + exp(-logit))
+//   model_probability_another_goal = 1 - model_probability_next_goal_none
+//
+// This file never reads ml/, never retrains, never alters the model JSON,
+// feature order, or output contract -- it only consumes them. No network
+// calls, no UI logic, no knowledge of Match/scanner/provider types (see
+// lib/model/liveFeatureAdapter.ts for the seam that maps live match state
+// into the NextGoalNoneModelInput this module expects).
 // ---------------------------------------------------------------------------
 
-export const NEXT_GOAL_NONE_FEATURE_ORDER = [
+/** The exact feature order ml/train.py fit against -- position, not name lookup, is what the linear model scores against. */
+export const CANONICAL_FEATURE_ORDER = [
   "minute",
   "minute_squared",
   "current_home_score",
@@ -24,132 +33,234 @@ export const NEXT_GOAL_NONE_FEATURE_ORDER = [
   "red_cards_away",
 ] as const;
 
-export type NextGoalNoneFeatureName = (typeof NEXT_GOAL_NONE_FEATURE_ORDER)[number];
+export type ModelFeatureName = (typeof CANONICAL_FEATURE_ORDER)[number];
 
-export type NextGoalNoneFeatureVector = Record<NextGoalNoneFeatureName, number>;
+const EXPECTED_TARGET_NAME = "label_next_goal_none";
+const EXPECTED_POSITIVE_CLASS = 1;
 
-export class NextGoalNoneModelError extends Error {}
-
-interface ValidatedModelExport {
-  model_name: string;
-  feature_order: NextGoalNoneFeatureName[];
-  scaler_mean: number[];
-  scaler_scale: number[];
-  coefficients: number[];
-  intercept: number;
-  positive_class: number;
-  target_name: string;
+/** Typed, camelCase input -- one field per canonical feature, built by a live-feature adapter (never invented here). */
+export interface NextGoalNoneModelInput {
+  minute: number;
+  minuteSquared: number;
+  currentHomeScore: number;
+  currentAwayScore: number;
+  totalGoals: number;
+  goalDifference: number;
+  isDraw: 0 | 1;
+  timeSinceLastGoal: number;
+  redCardsHome: number;
+  redCardsAway: number;
 }
+
+/** Canonical output names, preserved verbatim from ml/predict.py's own contract. */
+export interface NextGoalNoneModelOutput {
+  model_name: string;
+  model_probability_next_goal_none: number;
+  model_probability_another_goal: number;
+}
+
+export interface ValidatedNextGoalNoneModel {
+  modelName: string;
+  featureOrder: readonly ModelFeatureName[];
+  scalerMean: readonly number[];
+  scalerScale: readonly number[];
+  coefficients: readonly number[];
+  intercept: number;
+}
+
+export interface FeatureContribution {
+  feature: ModelFeatureName;
+  rawValue: number;
+  standardizedValue: number;
+  coefficient: number;
+  /** coefficient * standardizedValue -- this feature's own share of the logit. */
+  contribution: number;
+}
+
+export class ModelSchemaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ModelSchemaError";
+  }
+}
+
+export class ModelInferenceError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ModelInferenceError";
+  }
+}
+
+/** Final-output safety clamp -- guards literal 0/1 and float edge cases without visibly altering any ordinary valid output (see requirement 5). */
+const PROBABILITY_EPSILON = 1e-9;
 
 function isFiniteNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
-function requireFiniteNumberArray(
-  value: unknown,
-  name: string,
-  expectedLength: number,
-): number[] {
-  if (!Array.isArray(value) || value.length !== expectedLength || !value.every(isFiniteNumber)) {
-    throw new NextGoalNoneModelError(
-      `Model export "${name}" must be a finite-number array of length ${expectedLength}.`,
-    );
-  }
-  return value;
+function isArrayOfFiniteNumbers(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every(isFiniteNumber);
 }
 
 /**
- * Validates the shape of the committed model export before any inference is
- * attempted. Deliberately strict -- an export with a shuffled/renamed
- * feature_order, mismatched array lengths, or an invalid scaler value fails
- * loudly here rather than silently producing a wrong prediction.
+ * Validates an arbitrary loaded object against the exact model schema this
+ * module expects, at runtime (requirement: "validate the loaded model
+ * schema at runtime"). Never mutates or "fixes" the input -- a malformed
+ * model fails loudly rather than silently degrading into wrong predictions.
+ * Exported (not just run once at import time) so tests can exercise it
+ * directly against synthetic fixtures without touching the real model file.
  */
-export function validateNextGoalNoneModelExport(raw: unknown): ValidatedModelExport {
+export function validateModelSchema(raw: unknown): ValidatedNextGoalNoneModel {
   if (typeof raw !== "object" || raw === null) {
-    throw new NextGoalNoneModelError("Model export must be a JSON object.");
+    throw new ModelSchemaError("model JSON must be an object");
   }
-  const m = raw as Record<string, unknown>;
+  const obj = raw as Record<string, unknown>;
 
-  if (!Array.isArray(m.feature_order) || m.feature_order.some((f) => typeof f !== "string")) {
-    throw new NextGoalNoneModelError("Model export \"feature_order\" must be a string array.");
+  if (typeof obj.model_name !== "string" || obj.model_name.length === 0) {
+    throw new ModelSchemaError("model_name must be a non-empty string");
   }
-  const featureOrder = m.feature_order as string[];
-  const expected = NEXT_GOAL_NONE_FEATURE_ORDER as readonly string[];
-  if (featureOrder.length !== expected.length || featureOrder.some((f, i) => f !== expected[i])) {
-    throw new NextGoalNoneModelError(
-      `Model export "feature_order" ${JSON.stringify(featureOrder)} does not match the expected ` +
-        `order ${JSON.stringify(expected)}.`,
+
+  const featureOrder = obj.feature_order;
+  if (!Array.isArray(featureOrder) || featureOrder.length !== CANONICAL_FEATURE_ORDER.length) {
+    throw new ModelSchemaError(
+      `feature_order must be an array of exactly ${CANONICAL_FEATURE_ORDER.length} names`,
     );
   }
+  for (let i = 0; i < CANONICAL_FEATURE_ORDER.length; i++) {
+    if (featureOrder[i] !== CANONICAL_FEATURE_ORDER[i]) {
+      throw new ModelSchemaError(
+        `feature_order[${i}] must be "${CANONICAL_FEATURE_ORDER[i]}", got ${JSON.stringify(featureOrder[i])}`,
+      );
+    }
+  }
 
-  const scalerMean = requireFiniteNumberArray(m.scaler_mean, "scaler_mean", expected.length);
-  const scalerScale = requireFiniteNumberArray(m.scaler_scale, "scaler_scale", expected.length);
-  const coefficients = requireFiniteNumberArray(m.coefficients, "coefficients", expected.length);
-
-  if (scalerScale.some((s) => s === 0)) {
-    throw new NextGoalNoneModelError("Model export \"scaler_scale\" must not contain zero.");
+  const featureCount = CANONICAL_FEATURE_ORDER.length;
+  if (!isArrayOfFiniteNumbers(obj.scaler_mean) || obj.scaler_mean.length !== featureCount) {
+    throw new ModelSchemaError(`scaler_mean must be an array of ${featureCount} finite numbers`);
   }
-  if (!isFiniteNumber(m.intercept)) {
-    throw new NextGoalNoneModelError("Model export \"intercept\" must be a finite number.");
+  if (!isArrayOfFiniteNumbers(obj.scaler_scale) || obj.scaler_scale.length !== featureCount) {
+    throw new ModelSchemaError(`scaler_scale must be an array of ${featureCount} finite numbers`);
   }
-  if (m.positive_class !== 0 && m.positive_class !== 1) {
-    throw new NextGoalNoneModelError("Model export \"positive_class\" must be 0 or 1.");
+  if (!isArrayOfFiniteNumbers(obj.coefficients) || obj.coefficients.length !== featureCount) {
+    throw new ModelSchemaError(`coefficients must be an array of ${featureCount} finite numbers`);
   }
-  if (typeof m.model_name !== "string" || typeof m.target_name !== "string") {
-    throw new NextGoalNoneModelError("Model export \"model_name\"/\"target_name\" must be strings.");
+  if (!isFiniteNumber(obj.intercept)) {
+    throw new ModelSchemaError("intercept must be a finite number");
+  }
+  if (obj.positive_class !== EXPECTED_POSITIVE_CLASS) {
+    throw new ModelSchemaError(`positive_class must be ${EXPECTED_POSITIVE_CLASS}, got ${JSON.stringify(obj.positive_class)}`);
+  }
+  if (obj.target_name !== EXPECTED_TARGET_NAME) {
+    throw new ModelSchemaError(`target_name must be "${EXPECTED_TARGET_NAME}", got ${JSON.stringify(obj.target_name)}`);
   }
 
   return {
-    model_name: m.model_name,
-    feature_order: featureOrder as NextGoalNoneFeatureName[],
-    scaler_mean: scalerMean,
-    scaler_scale: scalerScale,
-    coefficients,
-    intercept: m.intercept,
-    positive_class: m.positive_class,
-    target_name: m.target_name,
+    modelName: obj.model_name,
+    featureOrder: CANONICAL_FEATURE_ORDER,
+    scalerMean: obj.scaler_mean,
+    scalerScale: obj.scaler_scale,
+    coefficients: obj.coefficients,
+    intercept: obj.intercept,
   };
 }
 
-const MODEL = validateNextGoalNoneModelExport(modelExport);
+/** Validated once at module load -- ml/models/next_goal_none_logistic_v1.json, imported verbatim and never altered. */
+export const NEXT_GOAL_NONE_MODEL: ValidatedNextGoalNoneModel = validateModelSchema(modelJson);
 
-// Inference below assumes P(y=1) = sigmoid(intercept + coef . standardized(x)),
-// which is only correct when class "1" (label_next_goal_none) is the
-// positive class the coefficients were fit against.
-if (MODEL.positive_class !== 1) {
-  throw new NextGoalNoneModelError(
-    `Expected the committed model's "positive_class" to be 1, got ${MODEL.positive_class}. ` +
-      "The standardize -> logit -> sigmoid formula below only computes P(class 1); update it if " +
-      "Henry's export convention changes.",
-  );
+/** Builds the raw feature vector in CANONICAL_FEATURE_ORDER from a typed input -- position, not name lookup, must match the trained model exactly. */
+export function buildFeatureVector(input: NextGoalNoneModelInput): number[] {
+  return [
+    input.minute,
+    input.minuteSquared,
+    input.currentHomeScore,
+    input.currentAwayScore,
+    input.totalGoals,
+    input.goalDifference,
+    input.isDraw,
+    input.timeSinceLastGoal,
+    input.redCardsHome,
+    input.redCardsAway,
+  ];
 }
 
-export const NEXT_GOAL_NONE_MODEL_NAME = MODEL.model_name;
+/**
+ * sklearn's own StandardScaler treats a zero-variance feature's scale as 1
+ * (see sklearn.preprocessing._data._handle_zeros_in_scale) rather than
+ * dividing by zero -- mirrored here defensively (requirement: "safely
+ * handle zero or invalid scaler values"), even though the real trained
+ * model's scaler_scale has no zero entries.
+ */
+function effectiveScale(scale: number): number {
+  return scale === 0 || !Number.isFinite(scale) ? 1 : scale;
+}
 
 /**
- * Henry's standardize -> logit -> sigmoid inference, applied to a caller-
- * supplied feature vector. Every one of the ten features must be present and
- * finite -- missing or non-finite values are rejected rather than silently
- * substituted (e.g. with 0 or a carried-forward guess).
+ * Per-feature contributions (coefficient * standardized value) plus the
+ * final sigmoid output. Pure and deterministic -- same input always
+ * produces the same output, no randomness, no network calls, no future
+ * information (it only ever sees the values it's given).
  */
-export function predictNextGoalNoneProbability(features: NextGoalNoneFeatureVector): number {
-  let logit = MODEL.intercept;
+export function explainInference(
+  model: ValidatedNextGoalNoneModel,
+  input: NextGoalNoneModelInput,
+): { output: NextGoalNoneModelOutput; contributions: FeatureContribution[] } {
+  const rawValues = buildFeatureVector(input);
 
-  for (let i = 0; i < NEXT_GOAL_NONE_FEATURE_ORDER.length; i++) {
-    const name = NEXT_GOAL_NONE_FEATURE_ORDER[i];
-    const raw = features[name];
-    if (!isFiniteNumber(raw)) {
-      throw new NextGoalNoneModelError(
-        `Feature "${name}" is missing or not a finite number (got ${JSON.stringify(raw)}).`,
-      );
-    }
-    const standardized = (raw - MODEL.scaler_mean[i]) / MODEL.scaler_scale[i];
-    logit += MODEL.coefficients[i] * standardized;
+  if (!rawValues.every(isFiniteNumber)) {
+    throw new ModelInferenceError(
+      "one or more raw feature values is not a finite number -- refusing to run inference rather than propagate NaN/Infinity",
+    );
   }
 
-  const probability = 1 / (1 + Math.exp(-logit));
-  if (!isFiniteNumber(probability) || probability < 0 || probability > 1) {
-    throw new NextGoalNoneModelError(`Computed probability ${probability} is outside [0, 1].`);
+  const contributions: FeatureContribution[] = model.featureOrder.map((feature, i) => {
+    const rawValue = rawValues[i];
+    const mean = model.scalerMean[i];
+    const scale = effectiveScale(model.scalerScale[i]);
+    const standardizedValue = (rawValue - mean) / scale;
+    const coefficient = model.coefficients[i];
+    return {
+      feature,
+      rawValue,
+      standardizedValue,
+      coefficient,
+      contribution: coefficient * standardizedValue,
+    };
+  });
+
+  const logit = model.intercept + contributions.reduce((sum, c) => sum + c.contribution, 0);
+
+  if (!Number.isFinite(logit)) {
+    throw new ModelInferenceError("computed logit is not finite -- refusing to run sigmoid on it");
   }
-  return probability;
+
+  const rawProbabilityNextGoalNone = 1 / (1 + Math.exp(-logit));
+
+  // Clamp only guards numeric edge cases (exact 0/1, float artefacts) -- it
+  // does not visibly alter any ordinary valid probability (requirement 5).
+  const clamped = Math.min(
+    Math.max(rawProbabilityNextGoalNone, PROBABILITY_EPSILON),
+    1 - PROBABILITY_EPSILON,
+  );
+
+  if (!Number.isFinite(clamped)) {
+    // Defensive only -- sigmoid of a finite logit is always finite and in
+    // (0, 1), so this should be unreachable, but requirement 13 ("no
+    // non-finite probability can reach the scanner or UI") is enforced here
+    // as a hard backstop regardless.
+    throw new ModelInferenceError("computed probability is not finite");
+  }
+
+  return {
+    output: {
+      model_name: model.modelName,
+      model_probability_next_goal_none: clamped,
+      model_probability_another_goal: 1 - clamped,
+    },
+    contributions,
+  };
+}
+
+/** Convenience wrapper bound to the real loaded model -- see explainInference for the pure, model-parametrized version tests use directly. */
+export function predictNextGoalNone(input: NextGoalNoneModelInput): NextGoalNoneModelOutput {
+  return explainInference(NEXT_GOAL_NONE_MODEL, input).output;
 }

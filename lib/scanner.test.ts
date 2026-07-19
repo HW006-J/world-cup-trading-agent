@@ -1,6 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeAnalysis } from "./engine.ts";
 import { demoProvider, MARKETS } from "./demoData.ts";
 import { scanAllMatches, scanMatch } from "./scanner.ts";
 
@@ -87,11 +86,19 @@ function liveMatches() {
 test("scanAllMatches over live matches ranks the strongest opportunity, tagged with its own match", () => {
   const scan = scanAllMatches(liveMatches(), demoProvider);
   assert.ok(scan.best, "expected a qualifying cross-match opportunity");
-  assert.equal(scan.best?.match.id, "bra-arg");
+  // bra-arg's nextGoal/none previously won this here on a heuristic-sourced
+  // BUY -- under the real-data-only rule, demo mode has no goal history, so
+  // nextGoal/none is unavailable there instead (see scanner.model.test.ts),
+  // and eng-fra's matchWinner/home BUY is the strongest remaining opportunity.
+  assert.equal(scan.best?.match.id, "eng-fra");
   assert.equal(scan.best?.match.status, "live");
-  assert.equal(scan.best?.marketId, "nextGoal");
-  assert.equal(scan.best?.selectionId, "none");
+  assert.equal(scan.best?.marketId, "matchWinner");
+  assert.equal(scan.best?.selectionId, "home");
   assert.equal(scan.best?.analysis.signal, "BUY");
+  assert.ok(
+    scan.unavailable.some((u) => u.match.id === "bra-arg"),
+    "bra-arg's nextGoal/none should be reported as unavailable, not silently dropped",
+  );
 });
 
 test("scanAllMatches over live matches excludes the finished match entirely", () => {
@@ -152,47 +159,6 @@ test("scanAllMatches handles an empty *live* set safely (e.g. no matches current
   assert.equal(scan.matchesScanned, 0);
   assert.equal(scan.best, null);
   assert.equal(scan.closest, null, "with nothing to rank, there is no closest opportunity either");
-});
-
-test("scanMatch accepts an optional analyze override and defaults to computeAnalysis", () => {
-  const match = findMatch("eng-fra");
-  let calls = 0;
-  const scan = scanMatch(match, demoProvider, MARKETS, (m, marketId, selectionId, odds) => {
-    calls++;
-    return computeAnalysis(m, marketId, selectionId, odds);
-  });
-  assert.equal(calls, scan.outcomesScanned);
-
-  const defaultScan = scanMatch(match, demoProvider, MARKETS);
-  assert.deepEqual(scan.opportunities, defaultScan.opportunities);
-});
-
-test("scanMatch's analyze override can change results for one selection only", () => {
-  const match = findMatch("eng-fra");
-  const scan = scanMatch(match, demoProvider, MARKETS, (m, marketId, selectionId, odds) => {
-    if (marketId === "nextGoal" && selectionId === "none") {
-      return { ...computeAnalysis(m, marketId, selectionId, odds), fairProbability: 0.9 };
-    }
-    return computeAnalysis(m, marketId, selectionId, odds);
-  });
-  const defaultScan = scanMatch(match, demoProvider, MARKETS);
-
-  const overriddenNone = scan.opportunities.find(
-    (o) => o.marketId === "nextGoal" && o.selectionId === "none",
-  );
-  const defaultNone = defaultScan.opportunities.find(
-    (o) => o.marketId === "nextGoal" && o.selectionId === "none",
-  );
-  assert.equal(overriddenNone?.analysis.fairProbability, 0.9);
-  assert.notEqual(overriddenNone?.analysis.fairProbability, defaultNone?.analysis.fairProbability);
-
-  for (const opp of scan.opportunities) {
-    if (opp.marketId === "nextGoal" && opp.selectionId === "none") continue;
-    const matching = defaultScan.opportunities.find(
-      (o) => o.marketId === opp.marketId && o.selectionId === opp.selectionId,
-    );
-    assert.deepEqual(opp.analysis, matching?.analysis);
-  }
 });
 
 test("demo mode never invokes fetch", () => {

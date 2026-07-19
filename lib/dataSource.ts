@@ -1,26 +1,20 @@
-import type { DataSourceMode } from "./types.ts";
-
 // ---------------------------------------------------------------------------
-// Data-source configuration.
+// TxLINE credential check.
 //
 // Pure, synchronous, side-effect-free (beyond reading process.env). Never
-// returns or logs credential values — only truthiness checks and a mode
-// string. Safe to import from anywhere; does not perform network I/O.
+// returns or logs credential values -- only a truthiness check. Safe to
+// import from anywhere; does not perform network I/O.
+//
+// This app is real-data-only (see app/api/txline/snapshot/route.ts, which
+// unconditionally calls createTxLineProvider() -- there is no demo/synthetic
+// mode switch left in the production path). assertTxLineCredentials()
+// therefore always requires TXLINE_API_TOKEN; it used to no-op unless a
+// separate TXLINE_DATA_SOURCE="txline" mode flag was also set, which meant a
+// missing token could silently pass this check while the route went on to
+// call the real API anyway (only failing later with a vaguer auth error).
+// That indirection is gone -- there is exactly one production mode, so there
+// is exactly one condition to check.
 // ---------------------------------------------------------------------------
-
-const VALID_MODES: readonly DataSourceMode[] = ["demo", "txline"];
-
-/**
- * Reads TXLINE_DATA_SOURCE and defaults safely to "demo" for any absent or
- * unrecognized value, so a typo or missing env var can never accidentally
- * enable a live path.
- */
-export function getConfiguredDataSource(): DataSourceMode {
-  const raw = process.env.TXLINE_DATA_SOURCE?.trim().toLowerCase();
-  return (VALID_MODES as readonly string[]).includes(raw ?? "")
-    ? (raw as DataSourceMode)
-    : "demo";
-}
 
 export class TxLineConfigError extends Error {
   constructor(message: string) {
@@ -30,16 +24,15 @@ export class TxLineConfigError extends Error {
 }
 
 /**
- * Throws a clear, credential-free error if txline mode is selected without
- * an API token configured. No-op in demo mode. Never includes the token
- * value (there isn't one to include) in the error message.
+ * Throws a clear, credential-free error if TXLINE_API_TOKEN isn't
+ * configured. Never includes the token value (there isn't one to include)
+ * in the error message.
  */
 export function assertTxLineCredentials(): void {
-  if (getConfiguredDataSource() !== "txline") return;
   if (!process.env.TXLINE_API_TOKEN) {
     throw new TxLineConfigError(
-      'TXLINE_DATA_SOURCE is set to "txline" but TXLINE_API_TOKEN is not configured. ' +
-        'Set TXLINE_API_TOKEN, or switch TXLINE_DATA_SOURCE back to "demo".',
+      "TXLINE_API_TOKEN is not configured. This app is real-data-only and has no demo/synthetic " +
+        "fallback -- set TXLINE_API_TOKEN in the environment before starting it.",
     );
   }
 }

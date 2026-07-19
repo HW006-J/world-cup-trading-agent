@@ -26,7 +26,9 @@ export interface RawTokenResponse {
 
 /** One entry from GET /api/fixtures/snapshot. */
 export interface RawFixture {
+  /** Unix epoch milliseconds -- verified 2026-07-19 against the real /api/fixtures/snapshot response (see scripts/txline-diagnostic.ts); NOT seconds, despite this field's name suggesting otherwise. */
   Ts: number;
+  /** Unix epoch milliseconds -- same verified format as Ts above. */
   StartTime: number;
   Competition: string;
   CompetitionId: number;
@@ -121,8 +123,10 @@ export interface RawScoresEntry {
   fixtureId: number;
   /** Top-level lifecycle state string; not documented as an enum. See normalize.ts. */
   gameState: string;
+  /** Epoch milliseconds, by inference from RawFixture.StartTime's verified format (see that field's own comment) -- not independently re-verified here against a genuinely live fixture, since none was available when this was checked (2026-07-19). */
   startTime: number;
   participant1IsHome: boolean;
+  /** Epoch milliseconds, same inferred-from-consistency caveat as startTime above. */
   ts: number;
   seq: number;
   /**

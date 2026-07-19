@@ -1,19 +1,29 @@
 {
-  "name": "goaledge-backend",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "name": "world-cup-trading-agent",
+  "version": "0.1.0",
+  "private": true,
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "test": "node --test lib/scanner.test.ts lib/scanner.model.test.ts lib/dataSource.test.ts lib/txline/normalize.test.ts lib/txline/marketRestriction.test.ts lib/txline/rawToModelInput.test.ts lib/trade.test.ts lib/monitoring/reducer.test.ts lib/monitoring/engine.test.ts lib/monitoring/liveScan.test.ts lib/monitoring/liveScan.model.test.ts lib/monitoring/goalHistoryTracker.test.ts lib/model/nextGoalNoneModel.test.ts lib/model/liveFeatureAdapter.test.ts lib/historical/reconstructMatch.test.ts lib/realOnly.test.ts",
+    "diagnose:txline": "tsx scripts/txline-diagnostic.ts"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
-    "axios": "^1.18.1",
-    "cors": "^2.8.6",
-    "dotenv": "^17.4.2",
-    "eventsource": "^4.1.0",
-    "express": "^5.2.1"
+    "next": "16.2.10",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.10",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.1",
+    "typescript": "^5"
   }
 }

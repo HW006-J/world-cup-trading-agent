@@ -1,19 +1,24 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0d12;
-  --surface: #10141b;
-  --surface-elevated: #161b24;
-  --border: #232935;
-  --foreground: #e7eaef;
-  --muted: #8b93a3;
-  --accent: #3b82f6;
-  --buy: #22c55e;
-  --buy-soft: #14261b;
-  --pass: #f59e0b;
+  --background: #0d0f14;
+  --surface: #161b24;
+  --surface-elevated: #1e2533;
+  --border: #2a3347;
+  --foreground: #e8eaf0;
+  --muted: #6b7898;
+  --accent: #00d4ff;
+  --buy: #00e676;
+  --buy-soft: #0d2b1c;
+  --pass: #ffd600;
   --pass-soft: #2b2313;
-  --negative: #ef4444;
-  --negative-soft: #2b1618;
+  --negative: #ff3d57;
+  --negative-soft: #2b141a;
+  /* Purple used for TxLINE-market-sourced values, distinct from --accent
+     (the trained model's own output), mirroring the reference design's
+     "market vs model" two-views split. */
+  --market: #9945ff;
+  --market-soft: #221a33;
 }
 
 @theme inline {
@@ -30,6 +35,8 @@
   --color-pass-soft: var(--pass-soft);
   --color-negative: var(--negative);
   --color-negative-soft: var(--negative-soft);
+  --color-market: var(--market);
+  --color-market-soft: var(--market-soft);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

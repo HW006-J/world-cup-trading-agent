@@ -77,7 +77,7 @@ export function ExplainabilityPanel({
     <Panel
       id={id}
       title={title}
-      subtitle={subtitle ?? `Top reasons behind PitchEdge's view of ${selectionLabel}`}
+      subtitle={subtitle ?? `Top reasons behind GoalEdge's view of ${selectionLabel}`}
     >
       {list}
     </Panel>

@@ -40,7 +40,7 @@ export interface NormalizedFixture {
   txlineFixtureId: number;
   home: TeamInfo;
   away: TeamInfo;
-  /** ISO timestamp of kickoff, taken from the fixture's StartTime (unix seconds). */
+  /** ISO timestamp of kickoff, taken from the fixture's StartTime (epoch milliseconds -- verified 2026-07-19 against a real /api/fixtures/snapshot response; see RawFixture.StartTime's own comment). */
   startTime: string;
 }
 
@@ -57,7 +57,7 @@ export function normalizeFixture(raw: RawFixture): NormalizedFixture {
     txlineFixtureId: raw.FixtureId,
     home,
     away,
-    startTime: new Date(raw.StartTime * 1000).toISOString(),
+    startTime: new Date(raw.StartTime).toISOString(),
   };
 }
 
@@ -102,6 +102,22 @@ function sumPlayerStat(
 ): number {
   if (!players) return 0;
   return Object.values(players).reduce((sum, p) => sum + (p[field] ?? 0), 0);
+}
+
+/**
+ * TxLINE's scores payload has no dedicated running-clock field (only period
+ * markers like H1/HT/H2 -- see RawScoresEntry.statusSoccerId), so "minute"
+ * is derived, never guessed, as real elapsed time since kickoff: a score
+ * entry's own timestamp minus the fixture's real kickoff time (both epoch
+ * milliseconds -- verified 2026-07-19 against a real /api/fixtures/snapshot
+ * response, see RawFixture's field comments), floored to a whole minute.
+ * This is an honest approximation (it doesn't subtract half-time's break or
+ * account for stoppage time the way a broadcast clock would), never a
+ * fabricated or default value -- real-data-only rule: no silently-zero
+ * minute standing in for one that was never actually computed.
+ */
+export function computeElapsedMinutes(scoreTimestampMs: number, kickoffMs: number): number {
+  return Math.max(0, Math.floor((scoreTimestampMs - kickoffMs) / 60_000));
 }
 
 export interface NormalizedScore {

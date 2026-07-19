@@ -6,6 +6,7 @@ import type { CrossMatchScanResult } from "@/lib/scanner";
 import type { PaperTrade, ProviderMeta } from "@/lib/types";
 import { createMonitorEngine, type MonitorEngine } from "./engine";
 import { tradeFingerprint } from "./fingerprint";
+import { createGoalHistoryTracker } from "./goalHistoryTracker";
 import { runLiveScan } from "./liveScan";
 import { INITIAL_MONITOR_STATE, type MonitorState } from "./reducer";
 
@@ -16,6 +17,7 @@ const EMPTY_SCAN_RESULT: CrossMatchScanResult = {
   opportunities: [],
   best: null,
   closest: null,
+  unavailable: [],
 };
 
 const DATA_ERROR_MESSAGE = "Live data is temporarily unavailable.";
@@ -58,9 +60,20 @@ export function useMarketMonitor(trades: PaperTrade[]): UseMarketMonitorResult {
   const lastGoodScanRef = useRef<CrossMatchScanResult>(EMPTY_SCAN_RESULT);
 
   useEffect(() => {
+    // One tracker per mount, captured by scan()'s closure below and
+    // persisted across every poll for that mount's lifetime -- see
+    // lib/monitoring/goalHistoryTracker.ts / runLiveScan's own docs on why
+    // this must not be recreated on every scan() call. A remount (e.g.
+    // leaving and re-entering live monitoring) intentionally starts
+    // goal-history tracking over, exactly like lastGoodScanRef below.
+    const goalHistoryTracker = createGoalHistoryTracker();
+
     async function scan(): Promise<CrossMatchScanResult> {
       try {
-        const { scan: result, liveMatchCount: count, meta } = await runLiveScan(fetchPublicSnapshot);
+        const { scan: result, liveMatchCount: count, meta } = await runLiveScan(
+          fetchPublicSnapshot,
+          goalHistoryTracker,
+        );
 
         lastGoodScanRef.current = result;
         setLiveMatchCount(count);
