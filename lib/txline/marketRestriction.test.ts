@@ -81,3 +81,37 @@ test("restrictToTradeableMarket passes through the real odds value unchanged, ne
   );
   assert.equal(result.oddsByMarket.nextGoal!.none, 2.567891);
 });
+
+// --- Another Goal pass-through (forward-compatible; never observed in a
+// real TxLINE payload as of the 2026-07-19 audit -- see lib/anotherGoal.ts) ---
+
+test("restrictToTradeableMarket keeps a genuine Another Goal selection alongside 'none' when both are published", () => {
+  const selections: MarketSelection[] = [...NEXT_GOAL_SELECTIONS, { id: "anotherGoal", label: "Another goal" }];
+  const result = restrictToTradeableMarket(
+    [NEXT_GOAL],
+    { nextGoal: selections },
+    { nextGoal: { home: 2.1, away: 2.6, none: 2.6, anotherGoal: 1.62 } },
+  );
+  assert.deepEqual(result.selectionsByMarket.nextGoal, [
+    { id: "none", label: "No further goals" },
+    { id: "anotherGoal", label: "Another goal" },
+  ]);
+  assert.deepEqual(result.oddsByMarket.nextGoal, { none: 2.6, anotherGoal: 1.62 });
+});
+
+test("restrictToTradeableMarket keeps a genuine Another Goal selection even when 'none' itself isn't published", () => {
+  const selections: MarketSelection[] = [{ id: "anotherGoal", label: "Another goal" }];
+  const result = restrictToTradeableMarket([NEXT_GOAL], { nextGoal: selections }, { nextGoal: { anotherGoal: 1.62 } });
+  assert.deepEqual(result.selectionsByMarket.nextGoal, [{ id: "anotherGoal", label: "Another goal" }]);
+  assert.deepEqual(result.oddsByMarket.nextGoal, { anotherGoal: 1.62 });
+});
+
+test("restrictToTradeableMarket never invents an Another Goal selection from 'none' -- today's real shape (home/away/none only) never produces one", () => {
+  const result = restrictToTradeableMarket(
+    [NEXT_GOAL],
+    { nextGoal: NEXT_GOAL_SELECTIONS },
+    { nextGoal: { home: 2.1, away: 2.6, none: 2.6 } },
+  );
+  assert.deepEqual(result.selectionsByMarket.nextGoal, [{ id: "none", label: "No further goals" }]);
+  assert.deepEqual(result.oddsByMarket.nextGoal, { none: 2.6 });
+});

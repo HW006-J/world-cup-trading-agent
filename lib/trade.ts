@@ -24,9 +24,14 @@ export const MARKET_FRESHNESS_THRESHOLD_MS = 30_000;
  * stake. Refuses (throws BuildPaperTradeError) rather than silently
  * creating a trade when any of PitchEdge v1's real-data preconditions
  * aren't met:
- *   - only nextGoal/none is ever tradeable (see lib/txline/provider.ts's
- *     restrictToTradeableMarket() -- no other market/selection should ever
- *     reach this function, but it's enforced here too rather than trusted);
+ *   - only nextGoal/none or nextGoal/anotherGoal is ever tradeable (see
+ *     lib/txline/marketRestriction.ts's restrictToTradeableMarket() -- no
+ *     other market/selection should ever reach this function, but it's
+ *     enforced here too rather than trusted). nextGoal/anotherGoal can only
+ *     ever be reached when TxLINE has genuinely published a distinct
+ *     Another Goal price (see lib/anotherGoal.ts's findGenuineAnotherGoalOdds)
+ *     -- a "none" price is never relabelled or reused as an Another Goal
+ *     trade;
  *   - the analysis must be sourced from the trained model, never the
  *     heuristic fallback -- an "insufficient observed history" or
  *     "ambiguous score transition" state must never create a trade;
@@ -50,9 +55,9 @@ export function buildPaperTrade(params: {
 }): PaperTrade {
   const { match, marketLabel, selectionId, selectionLabel, analysis, stake, marketOddsAsOf } = params;
 
-  if (analysis.marketId !== "nextGoal" || selectionId !== "none") {
+  if (analysis.marketId !== "nextGoal" || (selectionId !== "none" && selectionId !== "anotherGoal")) {
     throw new BuildPaperTradeError(
-      `Refusing to create a trade for ${analysis.marketId}/${selectionId} -- PitchEdge v1 only trades nextGoal/none.`,
+      `Refusing to create a trade for ${analysis.marketId}/${selectionId} -- PitchEdge v1 only trades nextGoal/none or nextGoal/anotherGoal.`,
     );
   }
   if (analysis.probabilitySource !== "trained_model") {

@@ -57,8 +57,8 @@ test("Play toggles isPlaying, and the autoplay timer advances to the next snapsh
 
 test("the demo scenario shown at every snapshot is always derived from the current genuine model probability, never hard-coded", async () => {
   const source = await readSource("components/HistoricalAnalysis.tsx");
-  assert.ok(source.includes("const modelPct = output.model_probability_next_goal_none;"));
-  assert.ok(source.includes("const scenario = scenarioForSnapshot(modelPct, reachedOpportunity, { minute, status });"));
+  assert.ok(source.includes("const anotherGoalPct = output.model_probability_another_goal;"));
+  assert.ok(source.includes("const scenario = scenarioForSnapshot(anotherGoalPct, reachedOpportunity, { minute, status });"));
   // scenarioForSnapshot must never be called with a literal number in place
   // of the model probability anywhere in the file.
   assert.ok(!/scenarioForSnapshot\(\s*0?\.\d+/.test(source), "scenarioForSnapshot must never be called with a hard-coded probability literal");

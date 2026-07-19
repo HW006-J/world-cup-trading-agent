@@ -22,10 +22,10 @@ import type { DemoScenario } from "@/lib/demoMarket";
 // ---------------------------------------------------------------------------
 
 export function DemoMarketComparison({
-  modelProbabilityNextGoalNone,
+  modelProbabilityAnotherGoal,
   scenario,
 }: {
-  modelProbabilityNextGoalNone: number;
+  modelProbabilityAnotherGoal: number;
   scenario: DemoScenario;
 }) {
   return (
@@ -34,7 +34,7 @@ export function DemoMarketComparison({
 
       <div className="flex flex-col gap-2">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <Stat label="GoalEdge probability" value={formatPercent(modelProbabilityNextGoalNone)} />
+          <Stat label="GoalEdge probability" value={formatPercent(modelProbabilityAnotherGoal)} />
           <Stat label="Market odds" value={formatOdds(scenario.decimalOdds)} />
           <Stat label="Market-implied probability" value={formatPercent(scenario.marketProbability)} />
           <Stat label="Edge" value={formatPp(scenario.edgePp)} tone={scenario.decision === "TRADE" ? "buy" : undefined} />

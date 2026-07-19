@@ -7,8 +7,11 @@ const STORAGE_KEY = "pitchedge.paperTrades.v1";
 /**
  * True only for a record that could genuinely have come from the real
  * approval flow (lib/trade.ts's buildPaperTrade): a live TxLINE fixture, the
- * trained model's own prediction, the one tradeable market/selection, and a
- * recorded market timestamp. Guards against any old synthetic/localStorage
+ * trained model's own prediction, one of the two tradeable nextGoal
+ * selections (legacy "none", or "anotherGoal" -- new trades only ever use
+ * "anotherGoal", but an existing "none" trade approved before this change
+ * remains readable), and a recorded market timestamp. Guards against any old
+ * synthetic/localStorage
  * trade (e.g. a pre-real-data prototype's seeded demo trades) ever being
  * displayed just because it happens to sit under the same storage key --
  * every field checked here is exactly what buildPaperTrade() always sets,
@@ -22,7 +25,7 @@ function isGenuinePaperTrade(value: unknown): value is PaperTrade {
     typeof t.matchId === "string" &&
     t.matchId.length > 0 &&
     t.marketId === "nextGoal" &&
-    t.selectionId === "none" &&
+    (t.selectionId === "none" || t.selectionId === "anotherGoal") &&
     typeof t.odds === "number" &&
     Number.isFinite(t.odds) &&
     typeof t.stake === "number" &&

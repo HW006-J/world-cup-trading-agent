@@ -100,10 +100,22 @@ test("loadStoredTrades rejects a record whose probabilitySource isn't trained_mo
   assert.deepEqual(loadStoredTrades(), []);
 });
 
-test("loadStoredTrades rejects a record for any market/selection other than nextGoal/none", () => {
+test("loadStoredTrades rejects a record for any market/selection other than nextGoal/none or nextGoal/anotherGoal", () => {
   const trade = genuineTrade({ marketId: "matchWinner", selectionId: "home" });
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
   assert.deepEqual(loadStoredTrades(), []);
+});
+
+test("loadStoredTrades keeps a genuine nextGoal/anotherGoal trade -- the new correct selection", () => {
+  const trade = genuineTrade({ selectionId: "anotherGoal", selectionLabel: "Another goal" });
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
+  assert.deepEqual(loadStoredTrades(), [trade]);
+});
+
+test("loadStoredTrades still keeps an existing legacy nextGoal/none trade approved before this change -- old paper trades remain readable", () => {
+  const trade = genuineTrade();
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
+  assert.deepEqual(loadStoredTrades(), [trade]);
 });
 
 test("loadStoredTrades rejects a record missing fixtureId or marketOddsAsOf", () => {

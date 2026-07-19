@@ -109,7 +109,8 @@ export type ProbabilitySource = "trained_model" | "heuristic_fallback";
  */
 export interface UnavailableNextGoalNone {
   marketId: "nextGoal";
-  selectionId: "none";
+  /** "anotherGoal" only when the trained model's inputs were unavailable while evaluating the Another Goal selection specifically -- see lib/scanner.ts's analyzeSelection. */
+  selectionId: "none" | "anotherGoal";
   missingFields: string[];
   /** Same optional human-readable note AnalysisResult.probabilityContextNote carries -- e.g. from goalHistoryTracker.describeGoalHistoryState -- explaining *why* (ambiguous transition, goals already on the board, etc). Undefined for callers that don't supply one. */
   contextNote?: string;

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Panel, Pill, Stat } from "./ui";
 import { ExplainabilityPanel } from "./ExplainabilityPanel";
 import { EDGE_THRESHOLD_PP } from "@/lib/engine";
+import { anotherGoalFairOdds } from "@/lib/anotherGoal";
 import {
   describeProbabilityContextNote,
   formatCurrency,
@@ -24,6 +25,17 @@ import type { FactorDirection, FactorExplanation, Match, PaperTrade } from "@/li
 
 const NO_LIVE_MATCHES_TEXT = "No live TxLINE matches are currently available.";
 const NO_MARKET_TEXT = "TxLINE has not published a No Further Goals market for this fixture.";
+/**
+ * Shown as the primary trading verdict whenever TxLINE hasn't genuinely
+ * published a distinct Another Goal (or exact equivalent) price -- which is
+ * every fixture today (see lib/anotherGoal.ts's findGenuineAnotherGoalOdds
+ * and the 2026-07-19 live audit in scripts/txline-diagnostic.ts). GoalEdge
+ * never derives this price from the "No further goal" market instead --
+ * see NO_MARKET_TEXT above, which is kept as a separate, honestly-labelled
+ * secondary reference note.
+ */
+const ANOTHER_GOAL_MARKET_UNAVAILABLE_TEXT =
+  "TxLINE does not currently publish a genuine Another Goal market for this fixture. GoalEdge will not fabricate a price from the No Further Goal market, so no trade can be proposed until one is published.";
 const DEFAULT_STAKE = "10";
 
 const STEPS = ["Live match data", "Trained model", "Edge detection", "Human approval"];
@@ -162,31 +174,45 @@ function ModelVsMarket({
 
   if (opportunity) {
     const { analysis } = opportunity;
-    const modelPct = analysis.modelProbabilities?.model_probability_next_goal_none ?? analysis.fairProbability;
-    const anotherGoalPct = analysis.modelProbabilities?.model_probability_another_goal ?? 1 - modelPct;
-    const fairOdds = modelPct > 0 ? formatOdds(1 / modelPct) : "--";
+    const noFurtherGoalPct = analysis.modelProbabilities?.model_probability_next_goal_none ?? 1 - analysis.fairProbability;
+    const anotherGoalPct = analysis.modelProbabilities?.model_probability_another_goal ?? analysis.fairProbability;
+    const noFurtherGoalFairOdds = noFurtherGoalPct > 0 ? formatOdds(1 / noFurtherGoalPct) : "--";
     return (
       <Panel title="Model versus market">
+        <div className="mb-5 text-center">
+          <p className="text-xs font-bold tracking-widest text-accent uppercase">Chance of another goal</p>
+          <p className="mt-2 text-5xl leading-none font-black tabular-nums text-accent sm:text-6xl">
+            {formatPercent(anotherGoalPct, 0)}
+          </p>
+          <p className="mt-1 text-xs text-muted">
+            Chance of no further goal: {formatPercent(noFurtherGoalPct, 0)} &middot; GoalEdge fair odds:{" "}
+            {anotherGoalPct > 0 ? formatOdds(anotherGoalFairOdds(anotherGoalPct)) : "--"}
+          </p>
+        </div>
+
         <div className="flex items-stretch justify-center gap-4 text-center sm:gap-10">
           <div className="flex-1">
             <p className="text-xs font-bold tracking-widest text-market uppercase">TxLINE market probability</p>
-            <p className="mt-2 text-5xl leading-none font-black tabular-nums text-market sm:text-6xl">
+            <p className="mt-2 text-3xl leading-none font-black tabular-nums text-market sm:text-4xl">
               {formatPercent(analysis.impliedProbability, 0)}
             </p>
           </div>
           <div className="w-px bg-border" aria-hidden />
           <div className="flex-1">
-            <p className="text-xs font-bold tracking-widest text-accent uppercase">GoalEdge model probability</p>
-            <p className="mt-2 text-5xl leading-none font-black tabular-nums text-accent sm:text-6xl">
-              {formatPercent(modelPct, 0)}
+            <p className="text-xs font-bold tracking-widest text-market uppercase">GoalEdge model probability</p>
+            <p className="mt-2 text-3xl leading-none font-black tabular-nums text-market sm:text-4xl">
+              {formatPercent(noFurtherGoalPct, 0)}
             </p>
           </div>
         </div>
+        <p className="mt-1 text-center text-[11px] text-muted">
+          No further goal &mdash; TxLINE&apos;s only genuinely published price, shown for reference. Not the traded
+          selection.
+        </p>
 
         <div className="mt-5 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
-          <Stat label="Another goal probability" value={formatPercent(anotherGoalPct, 0)} />
           <Stat label="Market decimal odds" value={formatOdds(opportunity.odds)} />
-          <Stat label="GoalEdge fair odds" value={fairOdds} />
+          <Stat label="No further goal fair odds" value={noFurtherGoalFairOdds} />
           <Stat label="Edge" value={formatPp(analysis.edgePp, 1)} tone={analysis.edgePp > EDGE_THRESHOLD_PP ? "buy" : undefined} />
           <Stat label="Data timestamp" value={providerMetaAsOf ? formatTimestamp(providerMetaAsOf) : "--"} />
         </div>
@@ -195,18 +221,18 @@ function ModelVsMarket({
   }
 
   if (modelOnly?.available) {
-    const modelPct = modelOnly.output.model_probability_next_goal_none;
+    const noFurtherGoalPct = modelOnly.output.model_probability_next_goal_none;
     const anotherGoalPct = modelOnly.output.model_probability_another_goal;
-    const fairOdds = modelPct > 0 ? formatOdds(1 / modelPct) : "--";
+    const fairOdds = anotherGoalPct > 0 ? formatOdds(anotherGoalFairOdds(anotherGoalPct)) : "--";
     return (
       <Panel title="Model versus market">
         <div className="text-center">
-          <p className="text-xs font-bold tracking-widest text-accent uppercase">GoalEdge model probability</p>
+          <p className="text-xs font-bold tracking-widest text-accent uppercase">Chance of another goal</p>
           <p className="mt-2 text-5xl leading-none font-black tabular-nums text-accent sm:text-6xl">
-            {formatPercent(modelPct, 0)}
+            {formatPercent(anotherGoalPct, 0)}
           </p>
           <p className="mt-2 text-sm text-muted">
-            Another goal probability: {formatPercent(anotherGoalPct, 0)} &middot; GoalEdge fair odds: {fairOdds}
+            Chance of no further goal: {formatPercent(noFurtherGoalPct, 0)} &middot; GoalEdge fair odds: {fairOdds}
           </p>
         </div>
         <p className="mt-4 rounded-md border border-border bg-surface-elevated px-3 py-2 text-center text-xs text-muted">
@@ -323,7 +349,7 @@ function ModelInputsCard({
           </button>
           {showFull ? (
             <div className="mt-3">
-              <ExplainabilityPanel factors={factors} selectionLabel="No further goals" title="Full model reasoning" bare />
+              <ExplainabilityPanel factors={factors} selectionLabel="Another goal" title="Full model reasoning" bare />
             </div>
           ) : null}
         </div>
@@ -523,8 +549,19 @@ export function LiveView({
   const selectedMatch =
     (validSelectedMatchId ? liveMatches.find((m) => m.id === validSelectedMatchId) : null) ?? defaultMatch;
 
-  const opportunity: CrossMatchOpportunity | null = selectedMatch
-    ? (scan?.opportunities.find((o) => o.match.id === selectedMatch.id) ?? null)
+  // TxLINE's only genuinely published nextGoal price today -- kept as a
+  // secondary reference (see ModelVsMarket), never presented as the traded
+  // Another Goal selection.
+  const noneOpportunity: CrossMatchOpportunity | null = selectedMatch
+    ? (scan?.opportunities.find((o) => o.match.id === selectedMatch.id && o.analysis.selectionId === "none") ?? null)
+    : null;
+  // The genuine, tradeable Another Goal opportunity -- only ever non-null
+  // once TxLINE genuinely publishes a distinct Another Goal price (see
+  // lib/anotherGoal.ts's findGenuineAnotherGoalOdds and
+  // lib/txline/marketRestriction.ts) -- always null today (see the
+  // 2026-07-19 live audit in scripts/txline-diagnostic.ts).
+  const anotherGoalOpportunity: CrossMatchOpportunity | null = selectedMatch
+    ? (scan?.opportunities.find((o) => o.match.id === selectedMatch.id && o.analysis.selectionId === "anotherGoal") ?? null)
     : null;
   const unavailableEntry: CrossMatchUnavailable | null = selectedMatch
     ? (scan?.unavailable.find((u) => u.match.id === selectedMatch.id) ?? null)
@@ -538,7 +575,7 @@ export function LiveView({
     : undefined;
 
   const modelOnly =
-    selectedMatch && !opportunity && !unavailableEntry
+    selectedMatch && !noneOpportunity && !anotherGoalOpportunity && !unavailableEntry
       ? evaluateNextGoalNoneModelOnly(selectedMatch, goalHistoryForSelected)
       : null;
 
@@ -556,42 +593,45 @@ export function LiveView({
   } else if (unavailableEntry) {
     decision = "MODEL_UNAVAILABLE";
     sentence = `Model unavailable: missing ${unavailableEntry.missingFields.join(", ") || "unknown"}.`;
-  } else if (!opportunity) {
-    if (modelOnly && !modelOnly.available) {
-      decision = "MODEL_UNAVAILABLE";
-      sentence = `Model unavailable: missing ${modelOnly.missingFields.join(", ") || "unknown"}.`;
-    } else {
-      decision = "MARKET_UNAVAILABLE";
-      sentence = NO_MARKET_TEXT;
-    }
+  } else if (!noneOpportunity && !anotherGoalOpportunity && modelOnly && !modelOnly.available) {
+    decision = "MODEL_UNAVAILABLE";
+    sentence = `Model unavailable: missing ${modelOnly.missingFields.join(", ") || "unknown"}.`;
+  } else if (!anotherGoalOpportunity) {
+    // The primary trading verdict is always about Another Goal -- a genuine
+    // "none" price being available (or not) never changes this branch, and
+    // is never substituted for a genuine Another Goal price.
+    decision = "MARKET_UNAVAILABLE";
+    sentence = ANOTHER_GOAL_MARKET_UNAVAILABLE_TEXT;
   } else if (isStale) {
     decision = "STALE";
     sentence = "The live TxLINE market snapshot is more than 30 seconds old -- refusing to trade until a fresh update arrives.";
   } else {
-    const narrative = buildVerdictNarrative(opportunity.analysis, opportunity.selectionLabel);
-    decision = opportunity.analysis.signal === "BUY" ? "BUY" : "PASS";
+    const narrative = buildVerdictNarrative(anotherGoalOpportunity.analysis, anotherGoalOpportunity.selectionLabel);
+    decision = anotherGoalOpportunity.analysis.signal === "BUY" ? "BUY" : "PASS";
     sentence = decision === "BUY" ? narrative.headline : narrative.detail;
   }
 
   const canApprove =
     !!selectedMatch &&
-    !!opportunity &&
-    opportunity.analysis.signal === "BUY" &&
-    opportunity.analysis.probabilitySource === "trained_model" &&
+    !!anotherGoalOpportunity &&
+    anotherGoalOpportunity.analysis.signal === "BUY" &&
+    anotherGoalOpportunity.analysis.probabilitySource === "trained_model" &&
     !isStale &&
     selectedMatch.status !== "finished";
 
-  const factorsForReasoning: FactorExplanation[] | null = opportunity
-    ? opportunity.analysis.factors
-    : modelOnly?.available
-      ? modelOnly.contributions.map((c) => ({
-          id: c.feature,
-          label: c.feature,
-          detail: `Raw value: ${c.rawValue}`,
-          direction: (c.contribution > 0.02 ? "increase" : c.contribution < -0.02 ? "decrease" : "neutral") as FactorDirection,
-          magnitude: Math.abs(c.contribution),
-        }))
-      : null;
+  const factorsForReasoning: FactorExplanation[] | null = anotherGoalOpportunity
+    ? anotherGoalOpportunity.analysis.factors
+    : noneOpportunity
+      ? noneOpportunity.analysis.factors
+      : modelOnly?.available
+        ? modelOnly.contributions.map((c) => ({
+            id: c.feature,
+            label: c.feature,
+            detail: `Raw value: ${c.rawValue}`,
+            direction: (c.contribution > 0.02 ? "increase" : c.contribution < -0.02 ? "decrease" : "neutral") as FactorDirection,
+            magnitude: Math.abs(c.contribution),
+          }))
+        : null;
 
   return (
     <div className="flex flex-col gap-4">
@@ -606,7 +646,7 @@ export function LiveView({
       />
 
       <ModelVsMarket
-        opportunity={opportunity}
+        opportunity={noneOpportunity}
         unavailableEntry={unavailableEntry}
         modelOnly={modelOnly}
         providerMetaAsOf={providerMeta?.asOf ?? null}
@@ -619,16 +659,16 @@ export function LiveView({
           match={selectedMatch}
           timeSinceLastGoal={timeSinceLastGoal}
           factors={factorsForReasoning}
-          probabilitySource={opportunity?.analysis.probabilitySource}
-          contextNote={opportunity?.analysis.probabilityContextNote}
+          probabilitySource={(anotherGoalOpportunity ?? noneOpportunity)?.analysis.probabilitySource}
+          contextNote={(anotherGoalOpportunity ?? noneOpportunity)?.analysis.probabilityContextNote}
         />
       ) : null}
 
-      {canApprove && selectedMatch && opportunity && providerMeta ? (
+      {canApprove && selectedMatch && anotherGoalOpportunity && providerMeta ? (
         <ApprovalCard
-          key={fingerprintOf(opportunity)}
+          key={fingerprintOf(anotherGoalOpportunity)}
           match={selectedMatch}
-          opportunity={opportunity}
+          opportunity={anotherGoalOpportunity}
           marketOddsAsOf={providerMeta.asOf}
           onRecordTrade={onRecordTrade}
           onRejectToast={onRejectToast}

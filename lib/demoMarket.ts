@@ -28,9 +28,9 @@ export function marketProbabilityFromOdds(decimalOdds: number): number {
   return 1 / decimalOdds;
 }
 
-/** edgePercentagePoints = (modelProbabilityNextGoalNone - marketProbability) * 100. */
-export function computeEdgePercentagePoints(modelProbabilityNextGoalNone: number, marketProbability: number): number {
-  return (modelProbabilityNextGoalNone - marketProbability) * 100;
+/** edgePercentagePoints = (modelProbabilityAnotherGoal - marketProbability) * 100. */
+export function computeEdgePercentagePoints(modelProbabilityAnotherGoal: number, marketProbability: number): number {
+  return (modelProbabilityAnotherGoal - marketProbability) * 100;
 }
 
 /** TRADE only when edge is strictly greater than EDGE_THRESHOLD_PP -- exactly 5pp is PASS. */
@@ -70,29 +70,31 @@ const PASS_EXAMPLE_GAP = 0.03;
 
 /**
  * Derives a simulated market scenario from nothing but the trained model's
- * own current probability (never hard-coded, never re-deriving/altering
- * it) and a target gap. Threaded through the same
- * probability->odds->marketProbabilityFromOdds->edge pipeline a real
+ * own current Another Goal probability (never hard-coded, never
+ * re-deriving/altering it -- see lib/model/nextGoalNoneModel.ts's
+ * model_probability_another_goal, the exact complement of
+ * model_probability_next_goal_none) and a target gap. Threaded through the
+ * same probability->odds->marketProbabilityFromOdds->edge pipeline a real
  * decimal-odds market would produce, so "Show trade/pass example" exercises
  * the exact formulas above rather than a shortcut. confidence uses the same
  * formula genuine Live trading does, and decision uses the exact same
  * meetsBuyThreshold(edgePp, confidence) gate -- never edge alone.
  */
-function buildScenario(modelProbabilityNextGoalNone: number, gap: number, match: Pick<Match, "minute" | "status">): DemoScenario {
-  const targetProbability = clampProbability(modelProbabilityNextGoalNone - gap);
+function buildScenario(modelProbabilityAnotherGoal: number, gap: number, match: Pick<Match, "minute" | "status">): DemoScenario {
+  const targetProbability = clampProbability(modelProbabilityAnotherGoal - gap);
   const decimalOdds = probabilityToDecimalOdds(targetProbability);
   const marketProbability = marketProbabilityFromOdds(decimalOdds);
-  const edgePp = computeEdgePercentagePoints(modelProbabilityNextGoalNone, marketProbability);
-  const confidence = confidenceForModelProbability(match, modelProbabilityNextGoalNone, NEXT_GOAL_BASELINE_EVEN);
+  const edgePp = computeEdgePercentagePoints(modelProbabilityAnotherGoal, marketProbability);
+  const confidence = confidenceForModelProbability(match, modelProbabilityAnotherGoal, NEXT_GOAL_BASELINE_EVEN);
   const confidenceLabel = confidenceLabelFor(confidence);
   const decision: DemoDecision = meetsBuyThreshold(edgePp, confidence) ? "TRADE" : "PASS";
   return { marketProbability, decimalOdds, edgePp, confidence, confidenceLabel, decision };
 }
 
-export function buildTradeExampleScenario(modelProbabilityNextGoalNone: number, match: Pick<Match, "minute" | "status">): DemoScenario {
-  return buildScenario(modelProbabilityNextGoalNone, TRADE_EXAMPLE_GAP, match);
+export function buildTradeExampleScenario(modelProbabilityAnotherGoal: number, match: Pick<Match, "minute" | "status">): DemoScenario {
+  return buildScenario(modelProbabilityAnotherGoal, TRADE_EXAMPLE_GAP, match);
 }
 
-export function buildPassExampleScenario(modelProbabilityNextGoalNone: number, match: Pick<Match, "minute" | "status">): DemoScenario {
-  return buildScenario(modelProbabilityNextGoalNone, PASS_EXAMPLE_GAP, match);
+export function buildPassExampleScenario(modelProbabilityAnotherGoal: number, match: Pick<Match, "minute" | "status">): DemoScenario {
+  return buildScenario(modelProbabilityAnotherGoal, PASS_EXAMPLE_GAP, match);
 }

@@ -394,8 +394,10 @@ test("LiveView renders provenance via probabilitySourceLabel/describeProbability
 
 test("analyzeSelection never sources matchWinner or overUnder from the trained model, structurally", async () => {
   const source = await readSource("lib/scanner.ts");
-  // The trained-model branch is gated on an exact literal check.
-  assert.ok(source.includes('marketId === "nextGoal" && selectionId === "none"'));
+  // The trained-model branch is gated on an exact literal check -- gated on
+  // nextGoal plus exactly the two trained-model selections (none, and
+  // anotherGoal once genuinely published), never any other market/selection.
+  assert.ok(source.includes('marketId === "nextGoal" && (selectionId === "none" || selectionId === "anotherGoal")'));
 });
 
 // --- 14. existing safeguards remain intact ----------------------------------
@@ -464,8 +466,8 @@ test("LiveView labels TxLINE market probability and GoalEdge model probability d
 
 test("LiveView's canApprove gate requires trained-model BUY, fresh data, and an unfinished match -- never a lowered threshold", async () => {
   const source = await readSource("components/LiveView.tsx");
-  assert.ok(source.includes('opportunity.analysis.signal === "BUY"'));
-  assert.ok(source.includes('opportunity.analysis.probabilitySource === "trained_model"'));
+  assert.ok(source.includes('anotherGoalOpportunity.analysis.signal === "BUY"'));
+  assert.ok(source.includes('anotherGoalOpportunity.analysis.probabilitySource === "trained_model"'));
   assert.ok(source.includes("!isStale"));
   assert.ok(source.includes('selectedMatch.status !== "finished"'));
   // EDGE_THRESHOLD_PP/CONFIDENCE_THRESHOLD themselves are never redefined in the component --

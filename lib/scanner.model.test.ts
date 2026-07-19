@@ -257,6 +257,70 @@ test("nextGoal/none with genuinely available model inputs but no published TxLIN
   );
 });
 
+// --- nextGoal/anotherGoal: same trained model, complementary output field --
+
+test("analyzeSelection uses the trained model for nextGoal/anotherGoal when live features are available, reading model_probability_another_goal as fairProbability", () => {
+  const match = makeMatch();
+  const none = expectAnalysis(analyzeSelection(match, "nextGoal", "none", 2.6, AVAILABLE_HISTORY));
+  const anotherGoal = expectAnalysis(analyzeSelection(match, "nextGoal", "anotherGoal", 1.62, AVAILABLE_HISTORY));
+  assert.equal(anotherGoal.probabilitySource, "trained_model");
+  assert.ok(anotherGoal.modelProbabilities);
+  assert.equal(anotherGoal.fairProbability, anotherGoal.modelProbabilities?.model_probability_another_goal);
+  // Exact complement of the "none" evaluation's own fairProbability (both
+  // read from the same explainInference() call -- see requirement 1/2).
+  assert.ok(Math.abs(anotherGoal.fairProbability + none.fairProbability - 1) < 1e-9);
+  assert.deepEqual(anotherGoal.modelProbabilities, none.modelProbabilities);
+});
+
+test("nextGoal/anotherGoal becomes unavailable (never heuristic) under the exact same missing-input conditions as nextGoal/none", () => {
+  const match = makeMatch();
+  const result = expectUnavailable(analyzeSelection(match, "nextGoal", "anotherGoal", 1.62)); // no goalHistory
+  assert.equal(result.marketId, "nextGoal");
+  assert.equal(result.selectionId, "anotherGoal");
+  assert.deepEqual(result.missingFields, ["time_since_last_goal"]);
+});
+
+test("nextGoal/anotherGoal's odds never influence the trained model's own probability, only edgePp/impliedProbability", () => {
+  const match = makeMatch({ minute: 60, homeScore: 1, awayScore: 1 });
+  const cheap = expectAnalysis(analyzeSelection(match, "nextGoal", "anotherGoal", 1.2, AVAILABLE_HISTORY));
+  const generous = expectAnalysis(analyzeSelection(match, "nextGoal", "anotherGoal", 8.25, AVAILABLE_HISTORY));
+  assert.equal(cheap.fairProbability, generous.fairProbability);
+  assert.notEqual(cheap.edgePp, generous.edgePp);
+});
+
+test("a 6pp edge produces BUY end-to-end for nextGoal/anotherGoal, once confidence also clears its own threshold", () => {
+  const match = makeMatch({ minute: 80, homeScore: 2, awayScore: 0, stats: { ...makeMatch().stats, redCards: [1, 0] } });
+  const lateHistory: GoalHistoryPoint[] = [
+    { minute: 0, homeScore: 0, awayScore: 0 },
+    { minute: 20, homeScore: 1, awayScore: 0 },
+    { minute: 45, homeScore: 2, awayScore: 0 },
+  ];
+  const reference = expectAnalysis(analyzeSelection(match, "nextGoal", "anotherGoal", 2.0, lateHistory));
+  assert.ok(reference.confidence >= CONFIDENCE_THRESHOLD, "fixture must already clear the confidence threshold to isolate the edge check");
+  const targetImplied = reference.fairProbability - 0.06;
+  assert.ok(targetImplied > 0 && targetImplied < 1, `fixture's fairProbability (${reference.fairProbability}) must allow a clean 6pp gap`);
+  const odds = 1 / targetImplied;
+
+  const result = expectAnalysis(analyzeSelection(match, "nextGoal", "anotherGoal", odds, lateHistory));
+  assert.ok(Math.abs(result.edgePp - 6) < 1e-6, `expected ~6pp edge, got ${result.edgePp}`);
+  assert.equal(result.signal, "BUY");
+});
+
+test("exactly +5pp edge produces PASS for nextGoal/anotherGoal -- the same shared threshold, strictly greater than required", () => {
+  const match = makeMatch({ minute: 80, homeScore: 2, awayScore: 0, stats: { ...makeMatch().stats, redCards: [1, 0] } });
+  const lateHistory: GoalHistoryPoint[] = [
+    { minute: 0, homeScore: 0, awayScore: 0 },
+    { minute: 20, homeScore: 1, awayScore: 0 },
+    { minute: 45, homeScore: 2, awayScore: 0 },
+  ];
+  const reference = expectAnalysis(analyzeSelection(match, "nextGoal", "anotherGoal", 2.0, lateHistory));
+  const targetImplied = reference.fairProbability - 0.05;
+  const odds = 1 / targetImplied;
+  const result = expectAnalysis(analyzeSelection(match, "nextGoal", "anotherGoal", odds, lateHistory));
+  assert.ok(Math.abs(result.edgePp - 5) < 1e-6, `expected ~5pp edge, got ${result.edgePp}`);
+  assert.equal(result.signal, "PASS");
+});
+
 test("scanMatch over a demo match with no goal history never lets nextGoal/none reach a heuristic BUY", () => {
   // Regression check for the pre-existing "bra-arg" fixture (lib/scanner.test.ts
   // used to document its nextGoal/none price as a heuristic-driven BUY

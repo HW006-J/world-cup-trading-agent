@@ -25,7 +25,7 @@ test("buildDemoPaperTrade succeeds for an edge above the threshold and carries d
   assert.equal(trade.provider, "historical_txline");
   assert.equal(trade.marketPriceSource, "simulated_demo");
   assert.equal(trade.marketId, "nextGoal");
-  assert.equal(trade.selectionId, "none");
+  assert.equal(trade.selectionId, "anotherGoal", "new paper trades must store the correct selection, never the legacy 'none'");
   assert.equal(trade.fixtureId, "statsbomb_2018_8658");
   assert.ok(trade.id.length > 0);
   assert.ok(new Date(trade.timestamp).toString() !== "Invalid Date");

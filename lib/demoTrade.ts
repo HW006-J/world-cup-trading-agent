@@ -30,8 +30,9 @@ export interface DemoPaperTrade {
   homeScore: number;
   awayScore: number;
   marketId: "nextGoal";
-  selectionId: "none";
-  /** The genuine trained model's own probability -- never re-derived or altered here. */
+  /** New trades always use "anotherGoal" -- the correct traded selection. "none" only ever appears on an existing trade approved before this change; it remains readable (see lib/demoTradeStorage.ts) but is never produced by buildDemoPaperTrade anymore. */
+  selectionId: "anotherGoal" | "none";
+  /** The genuine trained model's own probability for the selection actually traded (model_probability_another_goal for new trades) -- never re-derived or altered here. */
   modelProbability: number;
   demoDecimalOdds: number;
   marketImpliedProbability: number;
@@ -84,7 +85,7 @@ export function buildDemoPaperTrade(params: {
     homeScore: params.homeScore,
     awayScore: params.awayScore,
     marketId: "nextGoal",
-    selectionId: "none",
+    selectionId: "anotherGoal",
     modelProbability: params.modelProbability,
     demoDecimalOdds: params.demoDecimalOdds,
     marketImpliedProbability: params.marketImpliedProbability,

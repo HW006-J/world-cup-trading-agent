@@ -50,7 +50,8 @@ function DemoTradesSection({ demoTrades }: { demoTrades: DemoPaperTrade[] }) {
               </span>
             </div>
             <p className="mt-1 text-xs text-muted">
-              Next Team to Score &middot; No further goal &middot; {trade.homeScore}-{trade.awayScore} at {trade.replayMinute}
+              Next Team to Score &middot; {trade.selectionId === "anotherGoal" ? "Another goal" : "No further goal"} &middot;{" "}
+              {trade.homeScore}-{trade.awayScore} at {trade.replayMinute}
               &apos;
             </p>
             <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted sm:grid-cols-4">

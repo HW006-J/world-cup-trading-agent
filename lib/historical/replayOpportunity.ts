@@ -45,20 +45,20 @@ export function hasReachedOpportunity(snapshotLabels: readonly string[], current
  * The demo scenario to display for the current snapshot: a small (~3pp)
  * PASS-caliber gap before the opportunity checkpoint, a large (~6pp)
  * TRADE-caliber gap at/after it -- always derived from the current genuine
- * model probability passed in (never hard-coded), reusing
+ * model Another Goal probability passed in (never hard-coded), reusing
  * lib/demoMarket.ts's buildPassExampleScenario/buildTradeExampleScenario
  * verbatim rather than a second copy of that math. `match` (minute/status)
  * feeds the same confidence formula and edge+confidence qualification rule
  * genuine Live trading uses -- see lib/demoMarket.ts.
  */
 export function scenarioForSnapshot(
-  modelProbabilityNextGoalNone: number,
+  modelProbabilityAnotherGoal: number,
   reachedOpportunity: boolean,
   match: Pick<Match, "minute" | "status">,
 ): DemoScenario {
   return reachedOpportunity
-    ? buildTradeExampleScenario(modelProbabilityNextGoalNone, match)
-    : buildPassExampleScenario(modelProbabilityNextGoalNone, match);
+    ? buildTradeExampleScenario(modelProbabilityAnotherGoal, match)
+    : buildPassExampleScenario(modelProbabilityAnotherGoal, match);
 }
 
 /**
@@ -87,17 +87,17 @@ export function shouldTriggerOpportunityModal(params: {
  * rendering the live-only "BUY" label.
  */
 export function buildDemoVerdictNarrative(
-  modelProbabilityNextGoalNone: number,
+  modelProbabilityAnotherGoal: number,
   scenario: DemoScenario,
 ): { headline: string; detail: string } {
   const marketPct = (scenario.marketProbability * 100).toFixed(1);
-  const modelPct = (modelProbabilityNextGoalNone * 100).toFixed(1);
+  const modelPct = (modelProbabilityAnotherGoal * 100).toFixed(1);
   const edgeAbs = Math.abs(scenario.edgePp).toFixed(1);
 
   const headline =
     scenario.edgePp >= 0
-      ? `The simulated market prices no further goal at ${marketPct}%, while GoalEdge estimates ${modelPct}%. That creates a ${edgeAbs} percentage-point edge.`
-      : `The simulated market prices no further goal at ${marketPct}%, while GoalEdge estimates only ${modelPct}%. The model sees ${edgeAbs} percentage points less value than the simulated market.`;
+      ? `The simulated market prices another goal at ${marketPct}%, while GoalEdge estimates ${modelPct}%. That creates a ${edgeAbs} percentage-point edge.`
+      : `The simulated market prices another goal at ${marketPct}%, while GoalEdge estimates only ${modelPct}%. The model sees ${edgeAbs} percentage points less value than the simulated market.`;
 
   let detail: string;
   if (scenario.decision === "TRADE") {

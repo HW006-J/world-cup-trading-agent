@@ -41,7 +41,7 @@ function genuineDemoTrade(overrides: Partial<DemoPaperTrade> = {}): DemoPaperTra
     homeScore: 4,
     awayScore: 2,
     marketId: "nextGoal",
-    selectionId: "none",
+    selectionId: "anotherGoal",
     modelProbability: 0.62,
     demoDecimalOdds: 1.79,
     marketImpliedProbability: 0.56,
@@ -57,6 +57,12 @@ function genuineDemoTrade(overrides: Partial<DemoPaperTrade> = {}): DemoPaperTra
 
 test("loadStoredDemoTrades keeps a genuine demo-trade record", () => {
   const trade = genuineDemoTrade();
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
+  assert.deepEqual(loadStoredDemoTrades(), [trade]);
+});
+
+test("loadStoredDemoTrades still keeps an existing legacy 'none'-selection demo trade recorded before this change -- old paper trades remain readable", () => {
+  const trade = genuineDemoTrade({ selectionId: "none" });
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
   assert.deepEqual(loadStoredDemoTrades(), [trade]);
 });

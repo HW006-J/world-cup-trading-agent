@@ -28,7 +28,7 @@ export function TradingOpportunityModal({
   homeScore,
   awayScore,
   minute,
-  modelProbabilityNextGoalNone,
+  modelProbabilityAnotherGoal,
   marketProbability,
   decimalOdds,
   edgePp,
@@ -43,7 +43,7 @@ export function TradingOpportunityModal({
   homeScore: number;
   awayScore: number;
   minute: number;
-  modelProbabilityNextGoalNone: number;
+  modelProbabilityAnotherGoal: number;
   marketProbability: number;
   decimalOdds: number;
   edgePp: number;
@@ -73,7 +73,7 @@ export function TradingOpportunityModal({
         replayMinute: minute,
         homeScore,
         awayScore,
-        modelProbability: modelProbabilityNextGoalNone,
+        modelProbability: modelProbabilityAnotherGoal,
         demoDecimalOdds: decimalOdds,
         marketImpliedProbability: marketProbability,
         edgePp,
@@ -104,12 +104,12 @@ export function TradingOpportunityModal({
           </button>
         </div>
 
-        <p className="mb-3 text-sm font-semibold text-foreground">No further goal</p>
+        <p className="mb-3 text-sm font-semibold text-foreground">Another goal</p>
 
         <div className="mb-3 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
           <div>
             <p className="text-[11px] text-muted">GoalEdge probability</p>
-            <p className="text-base font-semibold tabular-nums text-accent">{formatPercent(modelProbabilityNextGoalNone)}</p>
+            <p className="text-base font-semibold tabular-nums text-accent">{formatPercent(modelProbabilityAnotherGoal)}</p>
           </div>
           <div>
             <p className="text-[11px] text-muted">Market probability</p>
@@ -125,7 +125,10 @@ export function TradingOpportunityModal({
           </div>
         </div>
 
-        <p className="mb-4 text-center text-xs text-muted">GoalEdge found more than the required 5 percentage-point edge.</p>
+        <p className="mb-4 text-center text-xs text-muted">
+          GoalEdge predicts another goal more strongly than the market, creating an edge above the required five
+          percentage points.
+        </p>
 
         <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-surface-elevated px-3 py-2">
           <label htmlFor="demo-stake" className="text-xs font-medium text-muted">
@@ -179,7 +182,7 @@ export function TradingOpportunityModal({
           <ReasoningSummary
             contributions={contributions}
             minute={minute}
-            comparisonSentence={buildComparisonSentence(modelProbabilityNextGoalNone, marketProbability)}
+            comparisonSentence={buildComparisonSentence(modelProbabilityAnotherGoal, marketProbability)}
           />
         </div>
       </div>

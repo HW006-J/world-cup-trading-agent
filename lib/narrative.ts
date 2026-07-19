@@ -48,9 +48,9 @@ export function describeTrade(opportunity: Opportunity): string {
     return opportunity.selectionId === "draw" ? "Draw" : `${opportunity.selectionLabel} to win`;
   }
   if (opportunity.marketId === "nextGoal") {
-    return opportunity.selectionId === "none"
-      ? "No further goals"
-      : `${opportunity.selectionLabel} to score next`;
+    if (opportunity.selectionId === "none") return "No further goals";
+    if (opportunity.selectionId === "anotherGoal") return "Another goal";
+    return `${opportunity.selectionLabel} to score next`;
   }
   return `${opportunity.selectionLabel} goals`;
 }

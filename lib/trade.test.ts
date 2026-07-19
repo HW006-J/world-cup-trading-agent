@@ -181,6 +181,32 @@ test("buildPaperTrade refuses a PASS-signal analysis, even when trained-model-so
   );
 });
 
+test("buildPaperTrade succeeds for nextGoal/anotherGoal sourced from the trained model with real, fresh odds -- new paper trades store the correct selection", () => {
+  const freshAsOf = new Date().toISOString();
+  const trade = buildPaperTrade({
+    match: MATCH,
+    marketLabel: "Next Team to Score",
+    selectionId: "anotherGoal",
+    selectionLabel: "Another goal",
+    analysis: trainedModelAnalysis({
+      marketId: "nextGoal",
+      selectionId: "anotherGoal",
+      fairProbability: 0.4,
+      modelProbabilities: {
+        model_name: "next_goal_none_logistic_v1",
+        model_probability_next_goal_none: 0.6,
+        model_probability_another_goal: 0.4,
+      },
+    }),
+    stake: 10,
+    marketOddsAsOf: freshAsOf,
+  });
+  assert.equal(trade.marketId, "nextGoal");
+  assert.equal(trade.selectionId, "anotherGoal");
+  assert.equal(trade.provenance.provider, "txline_live");
+  assert.equal(trade.provenance.probabilitySource, "trained_model");
+});
+
 test("buildPaperTrade refuses any market/selection other than nextGoal/none, even with a trained-model-shaped analysis", () => {
   for (const [marketId, selectionId] of [
     ["matchWinner", "home"] as const,

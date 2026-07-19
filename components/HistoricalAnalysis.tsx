@@ -7,6 +7,7 @@ import { ReasoningSummary } from "./ModelReasoning";
 import { TradingOpportunityModal } from "./TradingOpportunityModal";
 import { ProbabilityHistoryChart, type GoalMarker, type ProbabilityHistoryPoint } from "./ProbabilityHistoryChart";
 import { formatOdds, formatPercent } from "@/lib/format";
+import { anotherGoalFairOdds } from "@/lib/anotherGoal";
 import type { DemoDecision } from "@/lib/demoMarket";
 import type { DemoPaperTrade } from "@/lib/demoTrade";
 import { deriveLiveFeatures, type GoalHistoryPoint } from "@/lib/model/liveFeatureAdapter";
@@ -328,7 +329,7 @@ function buildTimelinePoints(detail: HistoricalFixtureDetail): ProbabilityHistor
     const liveFeatures = deriveLiveFeatures(match, s.goalHistory);
     if (!liveFeatures.available) continue;
     const { output } = explainInference(NEXT_GOAL_NONE_MODEL, liveFeatures.input);
-    points.push({ label: s.label, minute: s.minute, probabilityNoneFurther: output.model_probability_next_goal_none });
+    points.push({ label: s.label, minute: s.minute, probabilityAnotherGoal: output.model_probability_another_goal });
   }
   return points;
 }
@@ -578,11 +579,18 @@ function ModelOnlyAnalysis({
   onCloseModal: () => void;
 }) {
   const { output, contributions } = explainInference(NEXT_GOAL_NONE_MODEL, liveFeaturesInput);
-  const modelPct = output.model_probability_next_goal_none;
-  const fairOdds = modelPct > 0 ? formatOdds(1 / modelPct) : "--";
+  // Primary judge-facing prediction: chance of another goal
+  // (model_probability_another_goal, the trained model's own exact
+  // complement of model_probability_next_goal_none -- see
+  // lib/model/nextGoalNoneModel.ts's explainInference). "No further goal" is
+  // kept as a secondary reference figure below, never removed.
+  const anotherGoalPct = output.model_probability_another_goal;
+  const noFurtherGoalPct = output.model_probability_next_goal_none;
+  // anotherGoalFairOdds = 1 / modelProbabilityAnotherGoal.
+  const fairOdds = anotherGoalPct > 0 ? formatOdds(anotherGoalFairOdds(anotherGoalPct)) : "--";
 
-  // Real, verified historical nextGoal/none market odds have never been
-  // found in any downloaded fixture -- Historical mode never calls the
+  // Real, verified historical Another Goal / nextGoal market odds have never
+  // been found in any downloaded fixture -- Historical mode never calls the
   // genuine live scanner (analyzeSelection) or computes a real edge against
   // a real market price; the trained model probability above is shown for
   // reference only. See lib/historical/provider.ts's findLatestNextGoalNoneOdds
@@ -594,9 +602,9 @@ function ModelOnlyAnalysis({
   // lib/trade.ts's genuine buildPaperTrade.
 
   // Never hard-coded: scenarioForSnapshot only ever derives the simulated
-  // market probability/odds/edge from modelPct, the trained model's own
-  // current output at this snapshot -- recomputed fresh every render.
-  const scenario = scenarioForSnapshot(modelPct, reachedOpportunity, { minute, status });
+  // market probability/odds/edge from anotherGoalPct, the trained model's
+  // own current output at this snapshot -- recomputed fresh every render.
+  const scenario = scenarioForSnapshot(anotherGoalPct, reachedOpportunity, { minute, status });
 
   // Detects a genuine TRADE<->PASS transition (never forced -- purely a
   // consequence of the real scenario/qualification math above) and briefly
@@ -627,22 +635,24 @@ function ModelOnlyAnalysis({
       {transitionMessage ? (
         <div className="rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-center">
           <p className="text-xs font-bold tracking-wide text-accent uppercase">{transitionMessage}</p>
-          <p className="mt-0.5 text-[11px] text-muted">{buildDemoVerdictNarrative(modelPct, scenario).detail}</p>
+          <p className="mt-0.5 text-[11px] text-muted">{buildDemoVerdictNarrative(anotherGoalPct, scenario).detail}</p>
         </div>
       ) : null}
 
+      <div className="text-center">
+        <p className="text-xs font-bold tracking-widest text-accent uppercase">Chance of another goal</p>
+        <p className="mt-1 text-4xl leading-none font-black tabular-nums text-accent">{formatPercent(anotherGoalPct)}</p>
+        <p className="mt-1 text-xs text-muted">Chance of no further goal: {formatPercent(noFurtherGoalPct)}</p>
+      </div>
+
       <div className="grid grid-cols-3 gap-2">
-        <Stat label="No further goal" value={formatPercent(modelPct)} hint="Trained model probability" />
-        <Stat
-          label="Another goal"
-          value={formatPercent(output.model_probability_another_goal)}
-          hint="Trained model probability"
-        />
+        <Stat label="Another goal" value={formatPercent(anotherGoalPct)} hint="Trained model probability" />
+        <Stat label="No further goal" value={formatPercent(noFurtherGoalPct)} hint="Trained model probability" />
         <Stat label="GoalEdge fair odds" value={fairOdds} hint="1 / model probability" />
       </div>
 
       <div className={highlightRecentEvent ? "animate-pulse rounded-lg ring-2 ring-buy/60" : ""}>
-        <DemoMarketComparison modelProbabilityNextGoalNone={modelPct} scenario={scenario} />
+        <DemoMarketComparison modelProbabilityAnotherGoal={anotherGoalPct} scenario={scenario} />
       </div>
 
       {notice ? (
@@ -654,7 +664,7 @@ function ModelOnlyAnalysis({
       <ReasoningSummary
         contributions={contributions}
         minute={minute}
-        comparisonSentence={buildComparisonSentence(modelPct, scenario.marketProbability)}
+        comparisonSentence={buildComparisonSentence(anotherGoalPct, scenario.marketProbability)}
       />
 
       {modalOpen && scenario.decision === "TRADE" ? (
@@ -665,7 +675,7 @@ function ModelOnlyAnalysis({
           homeScore={homeScore}
           awayScore={awayScore}
           minute={minute}
-          modelProbabilityNextGoalNone={modelPct}
+          modelProbabilityAnotherGoal={anotherGoalPct}
           marketProbability={scenario.marketProbability}
           decimalOdds={scenario.decimalOdds}
           edgePp={scenario.edgePp}

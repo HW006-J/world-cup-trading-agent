@@ -5,7 +5,7 @@ import { formatPercent } from "@/lib/format";
 export interface ProbabilityHistoryPoint {
   label: string;
   minute: number;
-  probabilityNoneFurther: number;
+  probabilityAnotherGoal: number;
 }
 
 export interface GoalMarker {
@@ -14,14 +14,15 @@ export interface GoalMarker {
 }
 
 /**
- * Progressive-reveal "Live probability history" chart. Receives ONLY the
- * points/goals that should currently be visible -- already filtered by the
- * caller via lib/historical/progressiveReveal.ts's visibleThrough(), never
- * the full match history (see components/HistoricalAnalysis.tsx, the only
- * caller). This component has no way to read anything beyond what it's
- * given as props, so it structurally cannot leak future information via a
- * tooltip, the accessibility text, a resize, or a rerender -- there is
- * simply nothing future in its data to leak.
+ * Progressive-reveal "Chance of another goal over time" chart -- GoalEdge's
+ * primary replay chart. Receives ONLY the points/goals that should currently
+ * be visible -- already filtered by the caller via
+ * lib/historical/progressiveReveal.ts's visibleThrough(), never the full
+ * match history (see components/HistoricalAnalysis.tsx, the only caller).
+ * This component has no way to read anything beyond what it's given as
+ * props, so it structurally cannot leak future information via a tooltip,
+ * the accessibility text, a resize, or a rerender -- there is simply
+ * nothing future in its data to leak.
  *
  * The latest revealed point pulses (Tailwind's built-in animate-pulse) so
  * judges can immediately see what just changed; the connecting line itself
@@ -40,7 +41,7 @@ export function ProbabilityHistoryChart({
   if (points.length === 0) {
     return (
       <div>
-        <p className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">Live probability history</p>
+        <p className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">Chance of another goal over time</p>
         <p className="text-sm text-muted">No match state has been revealed yet.</p>
       </div>
     );
@@ -65,7 +66,7 @@ export function ProbabilityHistoryChart({
   const midY = yFor(0.5);
 
   const linePath = points
-    .map((pt, i) => `${i === 0 ? "M" : "L"} ${xFor(pt.minute).toFixed(1)} ${yFor(pt.probabilityNoneFurther).toFixed(1)}`)
+    .map((pt, i) => `${i === 0 ? "M" : "L"} ${xFor(pt.minute).toFixed(1)} ${yFor(pt.probabilityAnotherGoal).toFixed(1)}`)
     .join(" ");
 
   const latest = points[points.length - 1];
@@ -73,16 +74,16 @@ export function ProbabilityHistoryChart({
   return (
     <div>
       <div className="mb-1 flex items-baseline justify-between gap-2">
-        <p className="text-xs font-semibold tracking-wide text-muted uppercase">Live probability history</p>
+        <p className="text-xs font-semibold tracking-wide text-muted uppercase">Chance of another goal over time</p>
         <p className="text-[11px] font-medium text-muted">
-          {latest.label} &middot; {formatPercent(latest.probabilityNoneFurther, 0)} no further goal
+          {latest.label} &middot; {formatPercent(latest.probabilityAnotherGoal, 0)} chance of another goal
         </p>
       </div>
       <svg
         viewBox={`0 0 ${width} ${height}`}
         className="w-full"
         role="img"
-        aria-label={`Probability of no further goal, revealed through minute ${latest.label}: currently ${formatPercent(latest.probabilityNoneFurther, 0)}.`}
+        aria-label={`Chance of another goal, revealed through minute ${latest.label}: currently ${formatPercent(latest.probabilityAnotherGoal, 0)}.`}
       >
         <line x1={padX} y1={midY} x2={width - padX} y2={midY} className="stroke-border" strokeWidth={1} />
 
@@ -93,7 +94,7 @@ export function ProbabilityHistoryChart({
           transform={`rotate(-90 6 ${height / 2})`}
           className="fill-muted text-[7px] font-medium uppercase"
         >
-          No further goal %
+          Chance of another goal %
         </text>
 
         {goals.map((g) => (
@@ -121,12 +122,12 @@ export function ProbabilityHistoryChart({
             <g key={pt.label} onClick={() => onSelect(pt.minute)} className="cursor-pointer">
               <circle
                 cx={xFor(pt.minute)}
-                cy={yFor(pt.probabilityNoneFurther)}
+                cy={yFor(pt.probabilityAnotherGoal)}
                 r={isLatest ? 6 : 3.5}
                 className={`fill-accent stroke-surface ${isLatest ? "animate-pulse" : ""}`}
                 strokeWidth={2}
               />
-              <title>{`${pt.label}: ${formatPercent(pt.probabilityNoneFurther, 0)} probability of no further goal`}</title>
+              <title>{`${pt.label}: ${formatPercent(pt.probabilityAnotherGoal, 0)} chance of another goal`}</title>
             </g>
           );
         })}
@@ -134,7 +135,7 @@ export function ProbabilityHistoryChart({
       <p className="mt-0.5 text-center text-[9px] text-muted uppercase">Match minute</p>
       <p className="sr-only">
         {points
-          .map((p) => `${p.label}: ${formatPercent(p.probabilityNoneFurther, 0)} probability of no further goal.`)
+          .map((p) => `${p.label}: ${formatPercent(p.probabilityAnotherGoal, 0)} chance of another goal.`)
           .join(" ")}
         {goals.length > 0
           ? ` Goal${goals.length > 1 ? "s" : ""} so far at ${goals.map((g) => `${g.minute}'`).join(", ")}.`

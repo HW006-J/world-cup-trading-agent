@@ -86,29 +86,37 @@ function buildModelFactors(contributions: FeatureContribution[]): FactorExplanat
   }));
 }
 
+/** Baseline "even" probability for confidenceForModelProbability's decisiveness term -- 1/3 for the original 3-way nextGoal/none framing, 0.5 for the genuinely binary Another Goal framing. */
+function baselineEvenFor(selectionId: "none" | "anotherGoal"): number {
+  return selectionId === "anotherGoal" ? 0.5 : NEXT_GOAL_BASELINE_EVEN;
+}
+
 /**
- * Builds an AnalysisResult for nextGoal/none from the trained model's own
- * probability, reusing the exact same odds/edge/confidence/signal formula
- * lib/engine.ts's computeAnalysis() uses for every other case (requirement:
- * "preserve existing market calculations") -- only the fairProbability's
- * source changes.
+ * Builds an AnalysisResult for nextGoal/none or nextGoal/anotherGoal from
+ * the trained model's own probability, reusing the exact same odds/edge/
+ * confidence/signal formula lib/engine.ts's computeAnalysis() uses for every
+ * other case (requirement: "preserve existing market calculations") -- only
+ * the fairProbability's source changes. Both selections read from the exact
+ * same explainInference() call -- selectionId only ever picks which of the
+ * model's own two complementary output fields
+ * (model_probability_next_goal_none / model_probability_another_goal) is
+ * used as fairProbability; the model itself is never rerun or altered.
  */
 function buildTrainedModelAnalysis(
   match: Match,
   decimalOdds: number,
   modelInput: NextGoalNoneModelInput,
+  selectionId: "none" | "anotherGoal" = "none",
 ): AnalysisResult {
   const { output, contributions } = explainInference(NEXT_GOAL_NONE_MODEL, modelInput);
 
-  const fairProbability = clamp(
-    output.model_probability_next_goal_none,
-    MODEL_FAIR_PROBABILITY_CLAMP_MIN,
-    MODEL_FAIR_PROBABILITY_CLAMP_MAX,
-  );
+  const rawFairProbability =
+    selectionId === "anotherGoal" ? output.model_probability_another_goal : output.model_probability_next_goal_none;
+  const fairProbability = clamp(rawFairProbability, MODEL_FAIR_PROBABILITY_CLAMP_MIN, MODEL_FAIR_PROBABILITY_CLAMP_MAX);
   const impliedProbability = 1 / decimalOdds;
   const edgePp = (fairProbability - impliedProbability) * 100;
 
-  const confidence = confidenceForModelProbability(match, fairProbability, NEXT_GOAL_BASELINE_EVEN);
+  const confidence = confidenceForModelProbability(match, fairProbability, baselineEvenFor(selectionId));
   const confidenceLabel = confidenceLabelFor(confidence);
   // Mirrors lib/engine.ts's own finished-match guard -- a finished match can
   // never be traded, regardless of edge/confidence or probability source.
@@ -119,7 +127,7 @@ function buildTrainedModelAnalysis(
 
   return {
     marketId: "nextGoal",
-    selectionId: "none",
+    selectionId,
     odds: decimalOdds,
     impliedProbability,
     fairProbability,
@@ -175,8 +183,8 @@ export function analyzeSelection(
   /** Optional human-readable note (e.g. from goalHistoryTracker.describeGoalHistoryState) attached to the result as probabilityContextNote -- purely explanatory, never affects any computation. */
   contextNote?: string,
 ): AnalysisResult | UnavailableNextGoalNone {
-  if (marketId === "nextGoal" && selectionId === "none") {
-    // contextNote is only ever meaningful for this one market/selection --
+  if (marketId === "nextGoal" && (selectionId === "none" || selectionId === "anotherGoal")) {
+    // contextNote is only ever meaningful for these two market/selections --
     // attaching it here (both branches) rather than on the function's final
     // return keeps it from leaking onto an unrelated market's heuristic
     // result whenever a caller happens to pass one (e.g. scanMatch scanning
@@ -184,7 +192,7 @@ export function analyzeSelection(
     const liveFeatures = deriveLiveFeatures(match, goalHistory);
     if (liveFeatures.available) {
       try {
-        return withContextNote(buildTrainedModelAnalysis(match, decimalOdds, liveFeatures.input), contextNote);
+        return withContextNote(buildTrainedModelAnalysis(match, decimalOdds, liveFeatures.input, selectionId), contextNote);
       } catch (error) {
         // deriveLiveFeatures() already guarantees finite raw inputs, so a
         // ModelInferenceError here should be unreachable in practice. A
@@ -193,10 +201,10 @@ export function analyzeSelection(
         // through to the unavailable result below rather than the heuristic
         // (requirement 13: no non-finite probability may reach the UI).
         if (!(error instanceof ModelInferenceError)) throw error;
-        return { marketId: "nextGoal", selectionId: "none", missingFields: [], contextNote };
+        return { marketId: "nextGoal", selectionId, missingFields: [], contextNote };
       }
     }
-    return { marketId: "nextGoal", selectionId: "none", missingFields: liveFeatures.missingFields, contextNote };
+    return { marketId: "nextGoal", selectionId, missingFields: liveFeatures.missingFields, contextNote };
   }
   return computeAnalysis(match, marketId, selectionId, decimalOdds);
 }

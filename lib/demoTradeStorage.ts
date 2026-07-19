@@ -24,7 +24,7 @@ function isGenuineDemoTrade(value: unknown): value is DemoPaperTrade {
     typeof t.homeTeam === "string" &&
     typeof t.awayTeam === "string" &&
     t.marketId === "nextGoal" &&
-    t.selectionId === "none" &&
+    (t.selectionId === "anotherGoal" || t.selectionId === "none") &&
     typeof t.demoDecimalOdds === "number" &&
     Number.isFinite(t.demoDecimalOdds) &&
     typeof t.stake === "number" &&
