@@ -151,6 +151,21 @@ export interface ReconstructedMatchState {
   redCardsObserved: boolean;
 }
 
+/** One named snapshot of the fixture's real, reconstructed state at or before a target minute -- see reconstructSnapshots(). */
+export interface MatchSnapshot {
+  /** e.g. "15'" or "Full time". */
+  label: string;
+  /** The real minute this snapshot's data actually reflects -- may be earlier than the target minute if that's the latest real state known by then. */
+  minute: number;
+  homeScore: number;
+  awayScore: number;
+  redCardsHome: number;
+  redCardsAway: number;
+  /** Goal history truncated to goals at or before `minute` -- never a future goal. */
+  goalHistory: GoalHistoryPoint[];
+  redCardsObserved: boolean;
+}
+
 /**
  * The fixture's final known state (the last entry in its real, complete
  * timeline) plus its full real goal history -- a "how the match finished"
@@ -173,4 +188,61 @@ export function reconstructFinalState(rawEntries: RawHistoricalEntry[]): Reconst
     goalHistory,
     redCardsObserved,
   };
+}
+
+/** Standard minute checkpoints the historical timeline selector offers, before the always-present "final state" snapshot. */
+export const HISTORICAL_SNAPSHOT_TARGET_MINUTES = [15, 30, 45, 60, 70, 75, 80] as const;
+
+/**
+ * Builds a named snapshot at (or, honestly, at-or-before) each target
+ * minute, plus a final "Full time" snapshot -- every value taken from the
+ * real reconstructed timeline, never a future event relative to that
+ * snapshot's own minute. A target minute the match's real timeline never
+ * reached (e.g. requesting 75' from a fixture whose last real record is at
+ * minute 60) is simply omitted rather than faked; the final snapshot is
+ * always included when the timeline is non-empty.
+ */
+export function reconstructSnapshots(timeline: TimelineEntry[]): MatchSnapshot[] {
+  if (timeline.length === 0) return [];
+
+  const snapshots: MatchSnapshot[] = [];
+  const seenMinutes = new Set<number>();
+
+  function snapshotAt(targetMinute: number, label: string): MatchSnapshot | null {
+    // The latest real entry at or before targetMinute -- never a later one.
+    let entry: TimelineEntry | null = null;
+    for (const t of timeline) {
+      if (t.minute > targetMinute) break;
+      entry = t;
+    }
+    if (!entry) return null;
+
+    const goalHistory = deriveGoalHistory(timeline.filter((t) => t.minute <= entry!.minute));
+    return {
+      label,
+      minute: entry.minute,
+      homeScore: entry.homeGoals,
+      awayScore: entry.awayGoals,
+      redCardsHome: entry.homeReds,
+      redCardsAway: entry.awayReds,
+      goalHistory,
+      redCardsObserved: entry.hasScore,
+    };
+  }
+
+  const finalEntry = timeline[timeline.length - 1];
+
+  for (const targetMinute of HISTORICAL_SNAPSHOT_TARGET_MINUTES) {
+    if (targetMinute >= finalEntry.minute) continue; // the match never truthfully reached this checkpoint before full time
+    const snapshot = snapshotAt(targetMinute, `${targetMinute}'`);
+    if (snapshot && !seenMinutes.has(snapshot.minute)) {
+      seenMinutes.add(snapshot.minute);
+      snapshots.push(snapshot);
+    }
+  }
+
+  const fullTime = snapshotAt(finalEntry.minute, "Full time");
+  if (fullTime) snapshots.push(fullTime);
+
+  return snapshots;
 }

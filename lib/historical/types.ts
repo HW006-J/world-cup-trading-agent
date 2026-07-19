@@ -1,4 +1,4 @@
-import type { ReconstructedMatchState } from "./reconstructMatch.ts";
+import type { MatchSnapshot, ReconstructedMatchState } from "./reconstructMatch.ts";
 
 // Client-safe (no "server-only") -- lib/historical/provider.ts (which does
 // carry "server-only") and components/HistoricalAnalysis.tsx both import
@@ -9,6 +9,9 @@ export interface HistoricalFixtureSummary {
   fixtureId: string;
   homeParticipantId: number;
   awayParticipantId: number;
+  /** Real team name, only when found in a locally-available fixture/competition metadata file (see lib/historical/nameLookup.ts) -- never guessed. */
+  homeName: string | null;
+  awayName: string | null;
   finalHomeScore: number;
   finalAwayScore: number;
   finalMinute: number;
@@ -18,4 +21,6 @@ export interface HistoricalFixtureSummary {
 
 export interface HistoricalFixtureDetail extends HistoricalFixtureSummary {
   state: ReconstructedMatchState;
+  /** Real snapshots at standard minute checkpoints plus full time -- see reconstructSnapshots(). Only ever the checkpoints the real timeline genuinely reached. */
+  snapshots: MatchSnapshot[];
 }

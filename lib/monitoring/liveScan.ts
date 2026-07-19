@@ -12,7 +12,7 @@ import {
   type MatchGoalHistoryContext,
 } from "../scanner.ts";
 import { providerFromSnapshot, type PublicTxLineSnapshot } from "../txline/publicSnapshot.ts";
-import type { ProviderMeta } from "../types.ts";
+import type { Match, ProviderMeta } from "../types.ts";
 
 export interface LiveScanResult {
   scan: CrossMatchScanResult;
@@ -20,6 +20,16 @@ export interface LiveScanResult {
   meta: ProviderMeta;
   /** This poll's per-fixture goal-history trust state, keyed by Match.id -- lets a caller explain (or debug) why a given live match is/isn't using the trained model, beyond what's on the scan result itself. */
   goalHistoryStates: ReadonlyMap<string, FixtureGoalHistoryState>;
+  /**
+   * Every genuinely live fixture this poll, regardless of whether TxLINE has
+   * published a nextGoal/none price for it -- CrossMatchScanResult's own
+   * opportunities/unavailable arrays only ever include a fixture once a
+   * market exists (see lib/txline/marketRestriction.ts), so a live match
+   * with no published market at all would otherwise be invisible to the UI.
+   * Never fabricated -- exactly the same live matches scanAllMatches() was
+   * given.
+   */
+  matches: Match[];
 }
 
 function buildGoalHistoryByMatchId(
@@ -104,5 +114,6 @@ export async function runLiveScan(
     liveMatchCount: liveMatches.length,
     meta: snapshot.meta,
     goalHistoryStates,
+    matches: liveMatches,
   };
 }

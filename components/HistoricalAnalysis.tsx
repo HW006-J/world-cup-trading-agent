@@ -9,6 +9,7 @@ import { explainInference, NEXT_GOAL_NONE_MODEL, type NextGoalNoneModelInput } f
 import { analyzeSelection, isAnalysisResult } from "@/lib/scanner";
 import type { Match } from "@/lib/types";
 import type { HistoricalFixtureDetail, HistoricalFixtureSummary } from "@/lib/historical/types";
+import type { MatchSnapshot } from "@/lib/historical/reconstructMatch";
 
 // ---------------------------------------------------------------------------
 // Historical TxLINE match data
@@ -24,32 +25,36 @@ import type { HistoricalFixtureDetail, HistoricalFixtureSummary } from "@/lib/hi
 
 const PLACEHOLDER_STRENGTH = 75; // no TxLINE equivalent; matches lib/txline/normalize.ts's own convention
 
-function buildHistoricalMatch(detail: HistoricalFixtureDetail): Match {
+function fixtureLabel(f: HistoricalFixtureSummary): string {
+  return f.homeName && f.awayName ? `${f.homeName} v ${f.awayName}` : `Fixture ${f.fixtureId}`;
+}
+
+function buildSnapshotMatch(detail: HistoricalFixtureDetail, snapshot: MatchSnapshot): Match {
   return {
-    id: `historical-${detail.fixtureId}`,
+    id: `historical-${detail.fixtureId}-${snapshot.minute}`,
     home: {
       id: String(detail.homeParticipantId),
-      name: `Participant ${detail.homeParticipantId}`,
-      shortName: `P${detail.homeParticipantId}`,
+      name: detail.homeName ?? `Participant ${detail.homeParticipantId}`,
+      shortName: detail.homeName ? detail.homeName.slice(0, 3).toUpperCase() : `P${detail.homeParticipantId}`,
       strength: PLACEHOLDER_STRENGTH,
     },
     away: {
       id: String(detail.awayParticipantId),
-      name: `Participant ${detail.awayParticipantId}`,
-      shortName: `P${detail.awayParticipantId}`,
+      name: detail.awayName ?? `Participant ${detail.awayParticipantId}`,
+      shortName: detail.awayName ? detail.awayName.slice(0, 3).toUpperCase() : `P${detail.awayParticipantId}`,
       strength: PLACEHOLDER_STRENGTH,
     },
-    homeScore: detail.finalHomeScore,
-    awayScore: detail.finalAwayScore,
-    minute: detail.state.minute,
-    status: "finished",
+    homeScore: snapshot.homeScore,
+    awayScore: snapshot.awayScore,
+    minute: snapshot.minute,
+    status: snapshot.label === "Full time" ? "finished" : "live",
     stats: {
       possession: [50, 50],
       shots: [0, 0],
       shotsOnTarget: [0, 0],
       corners: [0, 0],
       attackingPressure: [50, 50],
-      redCards: [detail.state.redCardsHome, detail.state.redCardsAway],
+      redCards: [snapshot.redCardsHome, snapshot.redCardsAway],
     },
     marketMovement: 0,
     totalGoalsLine: 2.5,
@@ -68,6 +73,7 @@ export function HistoricalAnalysis() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<HistoricalFixtureDetail | null>(null);
   const [detailError, setDetailError] = useState(false);
+  const [selectedMinute, setSelectedMinute] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -94,7 +100,9 @@ export function HistoricalAnalysis() {
     // detailError itself (see the tab button's onClick below).
     fetchJson<HistoricalFixtureDetail>(`/api/historical/fixtures/${selectedId}`)
       .then((d) => {
-        if (!cancelled) setDetail(d);
+        if (cancelled) return;
+        setDetail(d);
+        setSelectedMinute(d.snapshots.length > 0 ? d.snapshots[d.snapshots.length - 1].minute : null);
       })
       .catch(() => {
         if (!cancelled) setDetailError(true);
@@ -144,7 +152,7 @@ export function HistoricalAnalysis() {
                     : "border-border bg-surface-elevated text-muted hover:border-accent/50"
                 }`}
               >
-                Fixture {f.fixtureId} ({f.finalHomeScore}-{f.finalAwayScore})
+                {fixtureLabel(f)} ({f.finalHomeScore}-{f.finalAwayScore})
               </button>
             ))}
           </div>
@@ -154,7 +162,7 @@ export function HistoricalAnalysis() {
           ) : !detail || detail.fixtureId !== selectedId ? (
             <p className="text-sm text-muted">Loading fixture…</p>
           ) : (
-            <HistoricalFixtureView detail={detail} />
+            <HistoricalFixtureView detail={detail} selectedMinute={selectedMinute} onSelectMinute={setSelectedMinute} />
           )}
         </>
       )}
@@ -162,26 +170,57 @@ export function HistoricalAnalysis() {
   );
 }
 
-function HistoricalFixtureView({ detail }: { detail: HistoricalFixtureDetail }) {
-  const match = buildHistoricalMatch(detail);
-  const liveFeatures = deriveLiveFeatures(match, detail.state.goalHistory);
+function HistoricalFixtureView({
+  detail,
+  selectedMinute,
+  onSelectMinute,
+}: {
+  detail: HistoricalFixtureDetail;
+  selectedMinute: number | null;
+  onSelectMinute: (minute: number) => void;
+}) {
+  if (detail.snapshots.length === 0) {
+    return <p className="text-sm text-muted">This fixture has no usable reconstructed timeline.</p>;
+  }
+
+  const snapshot = detail.snapshots.find((s) => s.minute === selectedMinute) ?? detail.snapshots[detail.snapshots.length - 1];
+  const match = buildSnapshotMatch(detail, snapshot);
+  const liveFeatures = deriveLiveFeatures(match, snapshot.goalHistory);
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Select match snapshot">
+        {detail.snapshots.map((s) => (
+          <button
+            key={s.minute + s.label}
+            type="button"
+            role="tab"
+            aria-selected={s.minute === snapshot.minute && s.label === snapshot.label}
+            onClick={() => onSelectMinute(s.minute)}
+            className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+              s.label === snapshot.label && s.minute === snapshot.minute
+                ? "border-accent bg-accent/10 text-foreground"
+                : "border-border bg-surface-elevated text-muted hover:border-accent/50"
+            }`}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-col items-center gap-1 text-center">
         <p className="text-xs font-semibold tracking-wide text-muted uppercase">
-          Full time &middot; {Math.round(detail.state.minute)}&apos;
+          {snapshot.label} &middot; {Math.round(snapshot.minute)}&apos;
         </p>
         <p className="text-3xl font-extrabold tabular-nums text-foreground">
-          {detail.finalHomeScore}&ndash;{detail.finalAwayScore}
+          {snapshot.homeScore}&ndash;{snapshot.awayScore}
         </p>
         <p className="text-xs text-muted">
-          Participant {detail.homeParticipantId} vs Participant {detail.awayParticipantId} &middot; Fixture{" "}
-          {detail.fixtureId}
+          {match.home.name} vs {match.away.name} &middot; Fixture {detail.fixtureId}
         </p>
-        {!detail.state.redCardsObserved ? (
+        {!snapshot.redCardsObserved ? (
           <p className="text-[11px] text-muted">
-            No score update was ever observed for this fixture -- red cards default to 0, not
+            No score update was ever observed by this point -- red cards default to 0, not
             observed data.
           </p>
         ) : null}
@@ -189,11 +228,16 @@ function HistoricalFixtureView({ detail }: { detail: HistoricalFixtureDetail }) 
 
       {!liveFeatures.available ? (
         <p className="text-sm text-muted">
-          The trained model&apos;s inputs are unavailable for this fixture (missing:{" "}
+          The trained model&apos;s inputs are unavailable at this snapshot (missing:{" "}
           {liveFeatures.missingFields.join(", ")}).
         </p>
       ) : (
-        <ModelOnlyAnalysis match={match} liveFeaturesInput={liveFeatures.input} detail={detail} />
+        <ModelOnlyAnalysis
+          match={match}
+          liveFeaturesInput={liveFeatures.input}
+          detail={detail}
+          isFinal={snapshot.label === "Full time"}
+        />
       )}
     </div>
   );
@@ -203,10 +247,12 @@ function ModelOnlyAnalysis({
   match,
   liveFeaturesInput,
   detail,
+  isFinal,
 }: {
   match: Match;
   liveFeaturesInput: NextGoalNoneModelInput;
   detail: HistoricalFixtureDetail;
+  isFinal: boolean;
 }) {
   const { output, contributions } = explainInference(NEXT_GOAL_NONE_MODEL, liveFeaturesInput);
 
@@ -214,12 +260,14 @@ function ModelOnlyAnalysis({
   // downloaded fixture so far (see the audit report) -- but if they ever
   // are (latestNextGoalNoneOdds genuinely non-null), a real edge is shown
   // using the exact same analyzeSelection() pipeline live monitoring uses,
-  // never a second/parallel calculation.
-  const realOdds = detail.latestNextGoalNoneOdds;
-  // liveFeatures.available is already guaranteed true by the caller (see
-  // HistoricalFixtureView below), so this is always a genuine AnalysisResult
-  // in practice -- isAnalysisResult narrows the type rather than asserting it.
-  const rawAnalysis = realOdds !== null ? analyzeSelection(match, "nextGoal", "none", realOdds, detail.state.goalHistory) : null;
+  // never a second/parallel calculation. Only ever paired with the "Full
+  // time" snapshot: findLatestNextGoalNoneOdds() only records the single
+  // most-recently-seen price across the whole fixture with no minute of its
+  // own, so pairing it against an earlier snapshot would misrepresent when
+  // that price was actually observed.
+  const realOdds = isFinal ? detail.latestNextGoalNoneOdds : null;
+  const rawAnalysis =
+    realOdds !== null ? analyzeSelection(match, "nextGoal", "none", realOdds, detail.state.goalHistory) : null;
   const analysisWithOdds = rawAnalysis && isAnalysisResult(rawAnalysis) ? rawAnalysis : null;
 
   return (
@@ -259,10 +307,11 @@ function ModelOnlyAnalysis({
           magnitude: Math.abs(c.contribution),
         }))}
         selectionLabel="No further goals"
-        title="Model inputs"
-        subtitle="Real, reconstructed match state at full time"
+        title="View full model reasoning"
+        subtitle="Real, reconstructed match state at this snapshot"
         bare
       />
     </div>
   );
 }
+

@@ -4,14 +4,58 @@ import type { PaperTrade } from "./types";
 // previously-stored trades invalid.
 const STORAGE_KEY = "pitchedge.paperTrades.v1";
 
-/** Reads approved paper trades persisted by a previous session. SSR-safe. */
+/**
+ * True only for a record that could genuinely have come from the real
+ * approval flow (lib/trade.ts's buildPaperTrade): a live TxLINE fixture, the
+ * trained model's own prediction, the one tradeable market/selection, and a
+ * recorded market timestamp. Guards against any old synthetic/localStorage
+ * trade (e.g. a pre-real-data prototype's seeded demo trades) ever being
+ * displayed just because it happens to sit under the same storage key --
+ * every field checked here is exactly what buildPaperTrade() always sets,
+ * never a heuristic guess about which records "look legitimate".
+ */
+function isGenuinePaperTrade(value: unknown): value is PaperTrade {
+  if (typeof value !== "object" || value === null) return false;
+  const t = value as Partial<PaperTrade>;
+  return (
+    typeof t.id === "string" &&
+    typeof t.matchId === "string" &&
+    t.matchId.length > 0 &&
+    t.marketId === "nextGoal" &&
+    t.selectionId === "none" &&
+    typeof t.odds === "number" &&
+    Number.isFinite(t.odds) &&
+    typeof t.stake === "number" &&
+    Number.isFinite(t.stake) &&
+    typeof t.provenance === "object" &&
+    t.provenance !== null &&
+    typeof t.provenance.fixtureId === "string" &&
+    t.provenance.fixtureId.length > 0 &&
+    t.provenance.provider === "txline_live" &&
+    t.provenance.probabilitySource === "trained_model" &&
+    typeof t.provenance.marketOddsAsOf === "string" &&
+    t.provenance.marketOddsAsOf.length > 0
+  );
+}
+
+/**
+ * Reads approved paper trades persisted by a previous session, filtering out
+ * anything that isn't a genuine real-approval-flow record (see
+ * isGenuinePaperTrade) -- e.g. an old seeded/demo trade left over from a
+ * pre-real-data build. SSR-safe.
+ */
 export function loadStoredTrades(): PaperTrade[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
+    if (!Array.isArray(parsed)) return [];
+    const genuine = parsed.filter(isGenuinePaperTrade);
+    // Persist the filtered list back so a legacy/malformed record doesn't
+    // keep resurfacing on every future load.
+    if (genuine.length !== parsed.length) saveStoredTrades(genuine);
+    return genuine;
   } catch {
     return [];
   }

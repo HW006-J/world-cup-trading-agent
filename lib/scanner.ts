@@ -7,6 +7,7 @@ import {
   type FeatureContribution,
   type ModelFeatureName,
   type NextGoalNoneModelInput,
+  type NextGoalNoneModelOutput,
 } from "./model/nextGoalNoneModel.ts";
 import type {
   AnalysisResult,
@@ -204,6 +205,37 @@ export interface Opportunity {
   selectionLabel: string;
   odds: number;
   analysis: AnalysisResult;
+}
+
+export type ModelOnlyResult =
+  | { available: true; output: NextGoalNoneModelOutput; contributions: FeatureContribution[] }
+  | { available: false; missingFields: string[] };
+
+/**
+ * Runs the trained next_goal_none_logistic_v1 model on its own, with no
+ * market price required -- used by the live UI to show "GoalEdge model
+ * probability" even before/without TxLINE publishing a nextGoal/none price
+ * for this fixture (real-data-only rule: still no fabricated market
+ * probability or edge in that case, just the model's own honest output).
+ * Reuses the exact same deriveLiveFeatures()/explainInference() functions
+ * analyzeSelection() uses for the odds-bearing case -- never a second,
+ * driftable copy of the model math.
+ */
+export function evaluateNextGoalNoneModelOnly(
+  match: Match,
+  goalHistory?: readonly GoalHistoryPoint[],
+): ModelOnlyResult {
+  const liveFeatures = deriveLiveFeatures(match, goalHistory);
+  if (!liveFeatures.available) {
+    return { available: false, missingFields: liveFeatures.missingFields };
+  }
+  try {
+    const { output, contributions } = explainInference(NEXT_GOAL_NONE_MODEL, liveFeatures.input);
+    return { available: true, output, contributions };
+  } catch (error) {
+    if (!(error instanceof ModelInferenceError)) throw error;
+    return { available: false, missingFields: [] };
+  }
 }
 
 export interface ScanResult {

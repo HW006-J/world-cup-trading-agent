@@ -42,7 +42,7 @@ export function TradeHistory({ trades }: { trades: PaperTrade[] }) {
       </div>
 
       {sorted.length === 0 ? (
-        <p className="text-sm text-muted">No paper trades recorded yet.</p>
+        <p className="text-sm text-muted">No real paper trades have been approved yet.</p>
       ) : (
         <>
           {/* Table layout for sm and up */}

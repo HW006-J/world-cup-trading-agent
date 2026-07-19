@@ -4,7 +4,13 @@ import path from "node:path";
 import { normalizeOdds } from "../txline/normalize.ts";
 import type { RawOddsPayload } from "../txline/types.ts";
 import type { TeamInfo } from "../types.ts";
-import { reconstructFinalState, type RawHistoricalEntry } from "./reconstructMatch.ts";
+import { loadFixtureNameLookup, type FixtureNames } from "./nameLookup.ts";
+import {
+  reconstructFinalState,
+  reconstructSnapshots,
+  reconstructTimeline,
+  type RawHistoricalEntry,
+} from "./reconstructMatch.ts";
 import type { HistoricalFixtureDetail, HistoricalFixtureSummary } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -88,9 +94,14 @@ async function loadFixture(fixtureId: string): Promise<{
   return { entries, homeParticipantId, awayParticipantId };
 }
 
+function namesFor(lookup: ReadonlyMap<string, FixtureNames>, fixtureId: string): { homeName: string | null; awayName: string | null } {
+  const entry = lookup.get(fixtureId);
+  return { homeName: entry?.home ?? null, awayName: entry?.away ?? null };
+}
+
 /** Every genuinely downloaded historical fixture, reconstructed from real data only. Returns [] (not an error) if none have been downloaded. */
 export async function listHistoricalFixtures(): Promise<HistoricalFixtureSummary[]> {
-  const fixtureIds = await listFixtureIds();
+  const [fixtureIds, nameLookup] = await Promise.all([listFixtureIds(), loadFixtureNameLookup()]);
   const summaries: HistoricalFixtureSummary[] = [];
 
   for (const fixtureId of fixtureIds) {
@@ -109,6 +120,7 @@ export async function listHistoricalFixtures(): Promise<HistoricalFixtureSummary
       fixtureId,
       homeParticipantId: loaded.homeParticipantId,
       awayParticipantId: loaded.awayParticipantId,
+      ...namesFor(nameLookup, fixtureId),
       finalHomeScore: state.homeScore,
       finalAwayScore: state.awayScore,
       finalMinute: state.minute,
@@ -126,20 +138,24 @@ export async function getHistoricalFixtureDetail(fixtureId: string): Promise<His
   const state = reconstructFinalState(loaded.entries);
   if (!state) return null;
 
-  const latestNextGoalNoneOdds = await findLatestNextGoalNoneOdds(
-    path.join(RAW_DATA_DIR, fixtureId),
-    loaded.homeParticipantId,
-    loaded.awayParticipantId,
-  );
+  const [latestNextGoalNoneOdds, nameLookup] = await Promise.all([
+    findLatestNextGoalNoneOdds(path.join(RAW_DATA_DIR, fixtureId), loaded.homeParticipantId, loaded.awayParticipantId),
+    loadFixtureNameLookup(),
+  ]);
+
+  const timeline = reconstructTimeline(loaded.entries);
+  const snapshots = reconstructSnapshots(timeline);
 
   return {
     fixtureId,
     homeParticipantId: loaded.homeParticipantId,
     awayParticipantId: loaded.awayParticipantId,
+    ...namesFor(nameLookup, fixtureId),
     finalHomeScore: state.homeScore,
     finalAwayScore: state.awayScore,
     finalMinute: state.minute,
     latestNextGoalNoneOdds,
     state,
+    snapshots,
   };
 }

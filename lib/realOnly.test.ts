@@ -56,18 +56,16 @@ test("the demo/replay/advanced-analysis UI components no longer exist", async ()
 
 // --- 5. zero live fixtures produces an honest empty state -------------------
 
-test("MarketMonitor shows the exact required copy for zero live matches", async () => {
-  const source = await readSource("components/MarketMonitor.tsx");
+test("LiveView shows the exact required copy for zero live matches", async () => {
+  const source = await readSource("components/LiveView.tsx");
   assert.ok(source.includes("No live TxLINE matches are currently available."));
 });
 
 // --- 6. missing live market produces market-unavailable state --------------
 
-test("MarketMonitor and RecommendationModal show the exact required copy for an unpublished market", async () => {
-  const monitorSource = await readSource("components/MarketMonitor.tsx");
-  const modalSource = await readSource("components/RecommendationModal.tsx");
-  assert.ok(monitorSource.includes("No further goal market is not currently available."));
-  assert.ok(modalSource.includes("No further goal market is not currently available."));
+test("LiveView shows the exact required copy for an unpublished market", async () => {
+  const source = await readSource("components/LiveView.tsx");
+  assert.ok(source.includes("TxLINE has not published a No Further Goals market for this fixture."));
 });
 
 // --- 7 (live path). insufficient history never produces an actionable BUY --
@@ -204,13 +202,10 @@ test("describeProbabilityContextNote prefers a supplied note and falls back to a
   assert.equal(withoutNote, "Waiting to observe match history");
 });
 
-test("MarketMonitor and RecommendationModal render provenance via probabilitySourceLabel/describeProbabilityContextNote", async () => {
-  const monitorSource = await readSource("components/MarketMonitor.tsx");
-  const modalSource = await readSource("components/RecommendationModal.tsx");
-  for (const source of [monitorSource, modalSource]) {
-    assert.ok(source.includes("probabilitySourceLabel"));
-    assert.ok(source.includes("describeProbabilityContextNote"));
-  }
+test("LiveView renders provenance via probabilitySourceLabel/describeProbabilityContextNote", async () => {
+  const source = await readSource("components/LiveView.tsx");
+  assert.ok(source.includes("probabilitySourceLabel"));
+  assert.ok(source.includes("describeProbabilityContextNote"));
 });
 
 // --- 3/4. only nextGoal/none is ever ML-labelled ----------------------------
@@ -258,7 +253,7 @@ test("the live dashboard components never contain leftover hard-coded prototype 
   // for a pool that was never real) -- these must never reappear in the
   // production dashboard components.
   const suspiciousLiterals = ["France", "Brazil", "Argentina v", "2.20", "1.65"];
-  for (const file of ["components/MarketMonitor.tsx", "components/RecommendationModal.tsx", "components/HistoricalAnalysis.tsx"]) {
+  for (const file of ["components/LiveView.tsx", "components/HistoricalAnalysis.tsx"]) {
     const source = await readSource(file);
     for (const literal of suspiciousLiterals) {
       assert.ok(!source.includes(literal), `${file} must not contain the leftover prototype literal "${literal}"`);
@@ -266,9 +261,36 @@ test("the live dashboard components never contain leftover hard-coded prototype 
   }
 });
 
-test("MarketMonitor renders match score/minute from real Match fields, never a literal number", async () => {
-  const source = await readSource("components/MarketMonitor.tsx");
+test("LiveView renders match score/minute from real Match fields, never a literal number", async () => {
+  const source = await readSource("components/LiveView.tsx");
   assert.ok(source.includes("match.homeScore") && source.includes("match.awayScore") && source.includes("match.minute"));
+});
+
+// --- 6/7. market probability and model probability labels are never confused, and GoalEdge fair odds are never labelled market odds ---
+
+test("LiveView labels TxLINE market probability and GoalEdge model probability distinctly, and never calls fair odds market odds", async () => {
+  const source = await readSource("components/LiveView.tsx");
+  assert.ok(source.includes("TxLINE market probability"));
+  assert.ok(source.includes("GoalEdge model probability"));
+  assert.ok(source.includes("GoalEdge fair odds"));
+  assert.ok(source.includes("Market decimal odds"));
+  // The two odds labels must never collapse into one ambiguous string.
+  assert.ok(!source.includes("GoalEdge fair odds (market)"));
+});
+
+// --- 8/9. BUY/PASS only under the existing real conditions, using the existing thresholds ---
+
+test("LiveView's canApprove gate requires trained-model BUY, fresh data, and an unfinished match -- never a lowered threshold", async () => {
+  const source = await readSource("components/LiveView.tsx");
+  assert.ok(source.includes('opportunity.analysis.signal === "BUY"'));
+  assert.ok(source.includes('opportunity.analysis.probabilitySource === "trained_model"'));
+  assert.ok(source.includes("!isStale"));
+  assert.ok(source.includes('selectedMatch.status !== "finished"'));
+  // EDGE_THRESHOLD_PP/CONFIDENCE_THRESHOLD themselves are never redefined in the component --
+  // it only ever imports and reuses lib/engine.ts's existing constants.
+  assert.ok(source.includes('from "@/lib/engine"'));
+  assert.ok(!/EDGE_THRESHOLD_PP\s*=\s*\d/.test(source), "must never redefine the edge threshold locally");
+  assert.ok(!/CONFIDENCE_THRESHOLD\s*=\s*\d/.test(source), "must never redefine the confidence threshold locally");
 });
 
 // --- no secrets are ever logged by the live diagnostic ----------------------
