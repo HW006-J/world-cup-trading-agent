@@ -30,6 +30,10 @@ export const MARKET_FRESHNESS_THRESHOLD_MS = 30_000;
  *   - the analysis must be sourced from the trained model, never the
  *     heuristic fallback -- an "insufficient observed history" or
  *     "ambiguous score transition" state must never create a trade;
+ *   - the analysis must itself carry a BUY signal -- lib/engine.ts's
+ *     meetsBuyThreshold() (edge strictly greater than EDGE_THRESHOLD_PP) is
+ *     the only place that decision is made; this function never re-derives
+ *     it, only refuses to build a trade from anything but its BUY result;
  *   - marketOddsAsOf (the live snapshot's own timestamp) must be provided,
  *     since a trade's provenance always records exactly which live
  *     snapshot its odds came from.
@@ -55,6 +59,11 @@ export function buildPaperTrade(params: {
     throw new BuildPaperTradeError(
       "Refusing to create a trade: the trained model's prediction was unavailable for this match " +
         `(${analysis.probabilityContextNote ?? "reason unknown"}). No heuristic-fallback trade is ever created.`,
+    );
+  }
+  if (analysis.signal !== "BUY") {
+    throw new BuildPaperTradeError(
+      `Refusing to create a trade: this opportunity's edge (${analysis.edgePp.toFixed(1)}pp) does not clear the BUY threshold.`,
     );
   }
 

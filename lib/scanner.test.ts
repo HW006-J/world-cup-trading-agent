@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { demoProvider, MARKETS } from "./demoData.ts";
+import { CONFIDENCE_THRESHOLD, EDGE_THRESHOLD_PP } from "./engine.ts";
 import { scanAllMatches, scanMatch } from "./scanner.ts";
 
 function findMatch(id: string) {
@@ -48,7 +49,7 @@ test("a finished match never produces BUY on any market, even where the raw edge
   // overUnder/over) would clear the BUY threshold on raw edge/confidence
   // alone -- proving the exclusion is real, not vacuous.
   const wouldHaveQualified = scan.opportunities.filter(
-    (o) => o.analysis.edgePp >= 4 && o.analysis.confidence >= 55,
+    (o) => o.analysis.edgePp > EDGE_THRESHOLD_PP && o.analysis.confidence >= CONFIDENCE_THRESHOLD,
   );
   assert.ok(
     wouldHaveQualified.length > 0,

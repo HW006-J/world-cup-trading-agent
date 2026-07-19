@@ -150,12 +150,12 @@ test("restrictToTrainedModelActionability leaves a trained-model BUY untouched",
 
 // --- 8/9. historical data without odds: model-only, no trade ---------------
 
-test("HistoricalAnalysis only computes a real edge when latestNextGoalNoneOdds is genuinely non-null", async () => {
+test("HistoricalAnalysis never computes an edge or a BUY/PASS signal -- current historical files carry no verified nextGoal/none odds", async () => {
   const source = await readSource("components/HistoricalAnalysis.tsx");
-  assert.ok(
-    /detail\.latestNextGoalNoneOdds/.test(source) && /realOdds !== null/.test(source),
-    "the odds-availability check must gate whether a real edge is ever computed",
-  );
+  assert.ok(!source.includes("analyzeSelection"), "HistoricalAnalysis must never call analyzeSelection (the odds/edge pipeline)");
+  assert.ok(!/edgePp/.test(source), "HistoricalAnalysis must never reference an edge value");
+  assert.ok(!/["'>]BUY["'<]/.test(source), "HistoricalAnalysis must never render a BUY label");
+  assert.ok(source.includes("Historical market odds unavailable"), "the unavailable message must always render, unconditionally");
 });
 
 test("HistoricalAnalysis never imports paper-trade creation -- a historical view can never open a trade", async () => {
@@ -291,6 +291,47 @@ test("LiveView's canApprove gate requires trained-model BUY, fresh data, and an 
   assert.ok(source.includes('from "@/lib/engine"'));
   assert.ok(!/EDGE_THRESHOLD_PP\s*=\s*\d/.test(source), "must never redefine the edge threshold locally");
   assert.ok(!/CONFIDENCE_THRESHOLD\s*=\s*\d/.test(source), "must never redefine the confidence threshold locally");
+});
+
+// --- STALE_DATA reuses the exact same freshness constant buildPaperTrade enforces --
+
+test("LiveView derives its stale-data decision from the same MARKET_FRESHNESS_THRESHOLD_MS buildPaperTrade enforces, never a second constant", async () => {
+  const source = await readSource("components/LiveView.tsx");
+  assert.ok(source.includes('from "@/lib/trade"') && source.includes("MARKET_FRESHNESS_THRESHOLD_MS"));
+  assert.ok(!/MARKET_FRESHNESS_THRESHOLD_MS\s*=\s*\d/.test(source), "must never redefine the freshness threshold locally");
+  assert.ok(source.includes("more than 30 seconds old"));
+});
+
+// --- a paper trade is only ever built from an explicit user click, never automatically --
+
+test("buildPaperTrade is only ever invoked from a click handler in LiveView, never automatically (e.g. inside a useEffect)", async () => {
+  const source = await readSource("components/LiveView.tsx");
+  const buildCalls = source.match(/buildPaperTrade\(/g) ?? [];
+  assert.equal(buildCalls.length, 1, "expected exactly one buildPaperTrade call site");
+  assert.ok(source.includes("onClick={handleApprove}"), "the trade must be built from an explicit user click, not fired automatically");
+
+  // Brace-match every useEffect(...) block and confirm none of them ever calls buildPaperTrade.
+  let searchFrom = 0;
+  for (;;) {
+    const idx = source.indexOf("useEffect(", searchFrom);
+    if (idx === -1) break;
+    const braceStart = source.indexOf("{", idx);
+    let depth = 0;
+    let end = braceStart;
+    for (let i = braceStart; i < source.length; i++) {
+      if (source[i] === "{") depth++;
+      else if (source[i] === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    const block = source.slice(idx, end + 1);
+    assert.ok(!block.includes("buildPaperTrade"), "a useEffect must never automatically build/place a trade");
+    searchFrom = end + 1;
+  }
 });
 
 // --- no secrets are ever logged by the live diagnostic ----------------------

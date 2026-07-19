@@ -17,9 +17,26 @@ import type {
 // a real model later only requires replacing the functions in this file.
 // ---------------------------------------------------------------------------
 
-export const EDGE_THRESHOLD_PP = 4;
+/**
+ * Minimum edge (fair probability minus market-implied probability, in
+ * percentage points) required to signal BUY. Strictly greater than -- a
+ * fixture sitting at exactly this many points of edge is still PASS, never
+ * BUY (see meetsBuyThreshold below, the single place this is enforced).
+ */
+export const EDGE_THRESHOLD_PP = 5.0;
 export const CONFIDENCE_THRESHOLD = 55;
 const DIRECTION_EPSILON = 0.02;
+
+/**
+ * Single central definition of "does this edge/confidence pair qualify for
+ * BUY" -- both lib/engine.ts's own heuristic path (computeAnalysis below)
+ * and lib/scanner.ts's trained-model path (buildTrainedModelAnalysis) call
+ * this rather than each re-writing the comparison, so the two can never
+ * silently drift apart (e.g. one using `>=` and the other `>`).
+ */
+export function meetsBuyThreshold(edgePp: number, confidence: number): boolean {
+  return edgePp > EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD;
+}
 
 // Exported (not just used internally) so lib/scanner.ts's trained-model
 // integration can reuse the exact same clamp/minute-fraction math when
@@ -407,9 +424,7 @@ export function computeAnalysis(
   // edge/confidence -- the engine itself refuses to emit BUY here rather
   // than relying on every caller to separately police match status.
   const signal: Signal =
-    match.status !== "finished" && edgePp >= EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD
-      ? "BUY"
-      : "PASS";
+    match.status !== "finished" && meetsBuyThreshold(edgePp, confidence) ? "BUY" : "PASS";
 
   const alignment = alignmentFor(marketId, selectionId);
   const explainedFactors: FactorExplanation[] = factors.map((f) => ({

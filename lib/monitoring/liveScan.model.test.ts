@@ -201,6 +201,23 @@ test("live polling: matchWinner and overUnder are completely unaffected by goal-
   }
 });
 
+// --- every live refresh reruns inference, never reuses a stale probability -
+
+test("every live refresh reruns the trained model -- consecutive polls with different match state produce different model output", async () => {
+  const tracker = createGoalHistoryTracker();
+  const poll1 = await runLiveScan(async () => snapshotFor([makeMatch({ minute: 5, homeScore: 0, awayScore: 0 })]), tracker);
+  const poll2 = await runLiveScan(async () => snapshotFor([makeMatch({ minute: 45, homeScore: 1, awayScore: 0 })]), tracker);
+
+  const ngn1 = findOpportunity(poll1.scan, "nextGoal", "none");
+  const ngn2 = findOpportunity(poll2.scan, "nextGoal", "none");
+  assert.ok(ngn1 && ngn2, "expected a trained-model opportunity on both polls");
+  assert.notEqual(
+    ngn1.analysis.modelProbabilities?.model_probability_next_goal_none,
+    ngn2.analysis.modelProbabilities?.model_probability_next_goal_none,
+    "each poll must rerun inference against that poll's own live match state, never reuse the previous result",
+  );
+});
+
 test("live polling: goalHistoryStates exposes per-fixture trust state for every live match", async () => {
   const tracker = createGoalHistoryTracker();
   const poll = await runLiveScan(

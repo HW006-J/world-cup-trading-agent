@@ -164,6 +164,23 @@ test("buildPaperTrade refuses a heuristic-fallback analysis -- no trade is creat
   );
 });
 
+test("buildPaperTrade refuses a PASS-signal analysis, even when trained-model-sourced with fresh odds -- edge threshold is enforced here too, not just trusted from the caller", () => {
+  const analysis = trainedModelAnalysis({ signal: "PASS", edgePp: 2.1 });
+  assert.throws(
+    () =>
+      buildPaperTrade({
+        match: MATCH,
+        marketLabel: "Next Team to Score",
+        selectionId: "none",
+        selectionLabel: "No further goals",
+        analysis,
+        stake: 10,
+        marketOddsAsOf: new Date().toISOString(),
+      }),
+    BuildPaperTradeError,
+  );
+});
+
 test("buildPaperTrade refuses any market/selection other than nextGoal/none, even with a trained-model-shaped analysis", () => {
   for (const [marketId, selectionId] of [
     ["matchWinner", "home"] as const,

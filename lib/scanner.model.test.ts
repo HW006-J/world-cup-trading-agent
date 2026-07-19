@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeAnalysis } from "./engine.ts";
+import { computeAnalysis, CONFIDENCE_THRESHOLD } from "./engine.ts";
 import { demoProvider, MARKETS } from "./demoData.ts";
 import type { GoalHistoryPoint } from "./model/liveFeatureAdapter.ts";
 import { predictNextGoalNone } from "./model/nextGoalNoneModel.ts";
 import { analyzeSelection, isAnalysisResult, scanMatch, type Opportunity } from "./scanner.ts";
-import type { AnalysisResult, Match, UnavailableNextGoalNone } from "./types.ts";
+import type { AnalysisResult, Match, MatchDataProvider, UnavailableNextGoalNone } from "./types.ts";
 
 function makeMatch(overrides: Partial<Match> = {}): Match {
   return {
@@ -184,6 +184,77 @@ test("scanMatch threads goalHistory through to nextGoal/none only, leaving other
     if (o.marketId === "nextGoal" && o.selectionId === "none") continue;
     assert.equal(o.analysis.probabilitySource, "heuristic_fallback", `${o.marketId}/${o.selectionId} must stay heuristic`);
   }
+});
+
+// --- edge/threshold requirements: odds never influence the model, and the
+// central >5pp threshold is wired correctly end-to-end -------------------
+
+test("the trained model's own probability never depends on the quoted odds -- only edgePp/impliedProbability do", () => {
+  const match = makeMatch({ minute: 60, homeScore: 1, awayScore: 1 });
+  const cheap = expectAnalysis(analyzeSelection(match, "nextGoal", "none", 1.5, AVAILABLE_HISTORY));
+  const generous = expectAnalysis(analyzeSelection(match, "nextGoal", "none", 8.25, AVAILABLE_HISTORY));
+  assert.equal(cheap.fairProbability, generous.fairProbability, "fairProbability must never depend on the odds passed in");
+  assert.deepEqual(cheap.modelProbabilities, generous.modelProbabilities);
+  assert.notEqual(cheap.edgePp, generous.edgePp, "edge must still move with the odds, via impliedProbability only");
+});
+
+test("analyzeSelection converts decimal odds to implied probability as exactly 1 / decimalOdds", () => {
+  const match = makeMatch();
+  const result = expectAnalysis(analyzeSelection(match, "nextGoal", "none", 2.5, AVAILABLE_HISTORY));
+  assert.equal(result.impliedProbability, 1 / 2.5);
+});
+
+test("a 6pp edge produces BUY end-to-end through analyzeSelection, once confidence also clears its own threshold", () => {
+  // Late match, well ahead, long scoreless spell since the last goal -- the
+  // trained model gives a comfortably high "no further goal" probability
+  // here (mirrors the minute-80 Python/TypeScript parity fixture in
+  // lib/model/nextGoalNoneModel.test.ts), leaving plenty of room below it to
+  // carve out a clean 6pp gap.
+  const match = makeMatch({ minute: 80, homeScore: 2, awayScore: 0, stats: { ...makeMatch().stats, redCards: [1, 0] } });
+  const lateHistory: GoalHistoryPoint[] = [
+    { minute: 0, homeScore: 0, awayScore: 0 },
+    { minute: 20, homeScore: 1, awayScore: 0 },
+    { minute: 45, homeScore: 2, awayScore: 0 },
+  ];
+  // Read the model's own fairProbability/confidence off a throwaway price first --
+  // odds never affect either (see the test above) -- then construct odds that
+  // produce a clean 6pp gap against that same fairProbability.
+  const reference = expectAnalysis(analyzeSelection(match, "nextGoal", "none", 2.0, lateHistory));
+  assert.ok(reference.confidence >= CONFIDENCE_THRESHOLD, "fixture must already clear the confidence threshold to isolate the edge check");
+  const targetImplied = reference.fairProbability - 0.06;
+  assert.ok(targetImplied > 0 && targetImplied < 1, `fixture's fairProbability (${reference.fairProbability}) must allow a clean 6pp gap`);
+  const odds = 1 / targetImplied;
+
+  const result = expectAnalysis(analyzeSelection(match, "nextGoal", "none", odds, lateHistory));
+  assert.ok(Math.abs(result.edgePp - 6) < 1e-6, `expected ~6pp edge, got ${result.edgePp}`);
+  assert.equal(result.signal, "BUY");
+});
+
+// --- MARKET_UNAVAILABLE vs MODEL_UNAVAILABLE: an unpublished price is never
+// reported as a model problem ------------------------------------------------
+
+test("nextGoal/none with genuinely available model inputs but no published TxLINE price for it is neither an opportunity nor an unavailable entry", () => {
+  const match = makeMatch();
+  const provider: MatchDataProvider = {
+    getMatches: () => [match],
+    getSupportedMarkets: () => [{ id: "nextGoal", label: "Next Team to Score", description: "" }],
+    getSelections: () => [
+      { id: "home", label: "Home" },
+      { id: "away", label: "Away" },
+      { id: "none", label: "No further goals" },
+    ],
+    // "none" price never published by TxLINE this poll -- distinct from a
+    // genuinely missing trained-model input.
+    getOdds: () => ({ home: 2.1, away: 2.4 }),
+    getMeta: () => ({ source: "txline", asOf: new Date().toISOString() }),
+  };
+  const scan = scanMatch(match, provider, provider.getSupportedMarkets(match), AVAILABLE_HISTORY);
+  assert.equal(scan.opportunities.find((o) => o.selectionId === "none"), undefined);
+  assert.equal(
+    scan.unavailable.find((u) => u.selectionId === "none"),
+    undefined,
+    "an unpublished price must never surface as a model-unavailable entry",
+  );
 });
 
 test("scanMatch over a demo match with no goal history never lets nextGoal/none reach a heuristic BUY", () => {

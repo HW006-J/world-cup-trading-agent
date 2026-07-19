@@ -1,4 +1,4 @@
-import { clamp, computeAnalysis, confidenceLabelFor, CONFIDENCE_THRESHOLD, EDGE_THRESHOLD_PP, minutesFraction } from "./engine.ts";
+import { clamp, computeAnalysis, confidenceLabelFor, meetsBuyThreshold, minutesFraction } from "./engine.ts";
 import { deriveLiveFeatures, type GoalHistoryPoint } from "./model/liveFeatureAdapter.ts";
 import {
   explainInference,
@@ -109,10 +109,10 @@ function buildTrainedModelAnalysis(
   const confidenceLabel = confidenceLabelFor(confidence);
   // Mirrors lib/engine.ts's own finished-match guard -- a finished match can
   // never be traded, regardless of edge/confidence or probability source.
+  // meetsBuyThreshold() is the same single central check computeAnalysis()
+  // uses, never a second, driftable copy of the edge/confidence comparison.
   const signal: Signal =
-    match.status !== "finished" && edgePp >= EDGE_THRESHOLD_PP && confidence >= CONFIDENCE_THRESHOLD
-      ? "BUY"
-      : "PASS";
+    match.status !== "finished" && meetsBuyThreshold(edgePp, confidence) ? "BUY" : "PASS";
 
   return {
     marketId: "nextGoal",

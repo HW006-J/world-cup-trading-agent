@@ -163,6 +163,7 @@ function ModelVsMarket({
   if (opportunity) {
     const { analysis } = opportunity;
     const modelPct = analysis.modelProbabilities?.model_probability_next_goal_none ?? analysis.fairProbability;
+    const anotherGoalPct = analysis.modelProbabilities?.model_probability_another_goal ?? 1 - modelPct;
     const fairOdds = modelPct > 0 ? formatOdds(1 / modelPct) : "--";
     return (
       <Panel title="Model versus market">
@@ -183,9 +184,10 @@ function ModelVsMarket({
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-2 text-center sm:grid-cols-4">
+          <Stat label="Another goal probability" value={formatPercent(anotherGoalPct, 0)} />
           <Stat label="Market decimal odds" value={formatOdds(opportunity.odds)} />
           <Stat label="GoalEdge fair odds" value={fairOdds} />
-          <Stat label="Edge" value={formatPp(analysis.edgePp, 1)} tone={analysis.edgePp >= EDGE_THRESHOLD_PP ? "buy" : undefined} />
+          <Stat label="Edge" value={formatPp(analysis.edgePp, 1)} tone={analysis.edgePp > EDGE_THRESHOLD_PP ? "buy" : undefined} />
           <Stat label="Data timestamp" value={providerMetaAsOf ? formatTimestamp(providerMetaAsOf) : "--"} />
         </div>
       </Panel>
@@ -194,6 +196,7 @@ function ModelVsMarket({
 
   if (modelOnly?.available) {
     const modelPct = modelOnly.output.model_probability_next_goal_none;
+    const anotherGoalPct = modelOnly.output.model_probability_another_goal;
     const fairOdds = modelPct > 0 ? formatOdds(1 / modelPct) : "--";
     return (
       <Panel title="Model versus market">
@@ -202,7 +205,9 @@ function ModelVsMarket({
           <p className="mt-2 text-5xl leading-none font-black tabular-nums text-accent sm:text-6xl">
             {formatPercent(modelPct, 0)}
           </p>
-          <p className="mt-2 text-sm text-muted">GoalEdge fair odds: {fairOdds}</p>
+          <p className="mt-2 text-sm text-muted">
+            Another goal probability: {formatPercent(anotherGoalPct, 0)} &middot; GoalEdge fair odds: {fairOdds}
+          </p>
         </div>
         <p className="mt-4 rounded-md border border-border bg-surface-elevated px-3 py-2 text-center text-xs text-muted">
           {NO_MARKET_TEXT}
