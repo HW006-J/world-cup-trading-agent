@@ -77,6 +77,10 @@ function findOpportunity(scan: Awaited<ReturnType<typeof runLiveScan>>["scan"], 
   return scan.opportunities.find((o) => o.marketId === marketId && o.selectionId === selectionId);
 }
 
+function findUnavailable(scan: Awaited<ReturnType<typeof runLiveScan>>["scan"], selectionId: string) {
+  return scan.unavailable.find((u) => u.selectionId === selectionId);
+}
+
 // --- 12. live model becomes usable after valid observed history exists -----
 
 test("live polling: nextGoal/none is available on the trained model from a scoreless first observation, and stays available through an observed goal", async () => {
@@ -105,12 +109,14 @@ test("live polling: nextGoal/none becomes usable once a clean goal is observed, 
   const tracker = createGoalHistoryTracker();
 
   // First ever observation already shows 1-0 -- the model must stay
-  // unavailable, since we don't know when that goal happened.
+  // unavailable (never a heuristic substitute), since we don't know when
+  // that goal happened.
   const poll1 = await runLiveScan(
     async () => snapshotFor([makeMatch({ minute: 20, homeScore: 1, awayScore: 0 })]),
     tracker,
   );
-  assert.equal(findOpportunity(poll1.scan, "nextGoal", "none")?.analysis.probabilitySource, "heuristic_fallback");
+  assert.equal(findOpportunity(poll1.scan, "nextGoal", "none"), undefined);
+  assert.equal(findUnavailable(poll1.scan, "none")?.contextNote, "Match already had goals when monitoring began");
 
   // A later goal IS witnessed live -- its own minute is now truthfully
   // known, so time_since_last_goal becomes computable from it (requirement:
@@ -125,20 +131,22 @@ test("live polling: nextGoal/none becomes usable once a clean goal is observed, 
   assert.equal(ngn2?.analysis.probabilityContextNote, "Observed live score transition");
 });
 
-test("live polling: a fixture first observed with goals already on the board stays on the heuristic until it's known", async () => {
+test("live polling: a fixture first observed with goals already on the board stays unavailable until it's known", async () => {
   const tracker = createGoalHistoryTracker();
   const poll = await runLiveScan(
     async () => snapshotFor([makeMatch({ minute: 40, homeScore: 2, awayScore: 1 })]),
     tracker,
   );
-  const ngn = findOpportunity(poll.scan, "nextGoal", "none");
-  assert.equal(ngn?.analysis.probabilitySource, "heuristic_fallback");
-  assert.equal(ngn?.analysis.probabilityContextNote, "Match already had goals when monitoring began");
+  assert.equal(findOpportunity(poll.scan, "nextGoal", "none"), undefined);
+  const ngn = findUnavailable(poll.scan, "none");
+  assert.ok(ngn);
+  assert.ok(ngn.missingFields.includes("time_since_last_goal"));
+  assert.equal(ngn.contextNote, "Match already had goals when monitoring began");
 });
 
-// --- 13. ambiguous history always uses heuristic fallback -------------------
+// --- 13. ambiguous history never falls back to a heuristic substitute ------
 
-test("live polling: an ambiguous score jump between polls keeps nextGoal/none on the heuristic with a clear reason", async () => {
+test("live polling: an ambiguous score jump between polls keeps nextGoal/none unavailable with a clear reason", async () => {
   const tracker = createGoalHistoryTracker();
   await runLiveScan(async () => snapshotFor([makeMatch({ minute: 0, homeScore: 0, awayScore: 0 })]), tracker);
 
@@ -146,9 +154,8 @@ test("live polling: an ambiguous score jump between polls keeps nextGoal/none on
     async () => snapshotFor([makeMatch({ minute: 40, homeScore: 2, awayScore: 0 })]), // +2 in one interval
     tracker,
   );
-  const ngn = findOpportunity(poll2.scan, "nextGoal", "none");
-  assert.equal(ngn?.analysis.probabilitySource, "heuristic_fallback");
-  assert.equal(ngn?.analysis.probabilityContextNote, "Ambiguous score transition");
+  assert.equal(findOpportunity(poll2.scan, "nextGoal", "none"), undefined);
+  assert.equal(findUnavailable(poll2.scan, "none")?.contextNote, "Ambiguous score transition");
 });
 
 // --- 10 (integration angle): fixture disappearing is cleaned up + doesn't leak into a same-id restart ---
@@ -167,9 +174,8 @@ test("live polling: a fixture that stops appearing (finished/disappeared) is pru
     async () => snapshotFor([makeMatch({ id: "m1", minute: 5, homeScore: 1, awayScore: 0 })]),
     tracker,
   );
-  const ngn = findOpportunity(poll.scan, "nextGoal", "none");
-  assert.equal(ngn?.analysis.probabilitySource, "heuristic_fallback");
-  assert.equal(ngn?.analysis.probabilityContextNote, "Match already had goals when monitoring began");
+  assert.equal(findOpportunity(poll.scan, "nextGoal", "none"), undefined);
+  assert.equal(findUnavailable(poll.scan, "none")?.contextNote, "Match already had goals when monitoring began");
 });
 
 // --- 15. every other market and selection remains unchanged ----------------

@@ -85,11 +85,35 @@ export type ConfidenceLabel = "Low" | "Medium" | "High";
  * Where an AnalysisResult's fairProbability came from. "trained_model" is
  * only ever used for the nextGoal market's "none" selection, and only when
  * the trained model's required live inputs were genuinely available (see
- * lib/model/liveFeatureAdapter.ts) -- every other market/selection, and any
- * nextGoal/none case where a required input was unavailable, is always
- * "heuristic_fallback" (lib/engine.ts, unchanged).
+ * lib/model/liveFeatureAdapter.ts). "heuristic_fallback" (lib/engine.ts,
+ * unchanged) is used for every other market/selection (matchWinner,
+ * overUnder, nextGoal/home, nextGoal/away) -- none of which the live TxLINE
+ * provider ever actually exposes (see lib/txline/marketRestriction.ts), so
+ * in production this value only ever appears in the demo/test provider path.
+ * A nextGoal/none case whose trained-model inputs are unavailable is never
+ * "heuristic_fallback" -- see UnavailableNextGoalNone below; no heuristic
+ * probability is ever substituted for a missing trained-model input.
  */
 export type ProbabilitySource = "trained_model" | "heuristic_fallback";
+
+/**
+ * A nextGoal/none evaluation that could not run the trained model because
+ * one or more required live inputs weren't genuinely available this cycle
+ * (see lib/model/liveFeatureAdapter.ts's LiveFeatureResult). Deliberately not
+ * an AnalysisResult: there is no honest probability, edge, confidence, or
+ * signal to show when the model didn't run, so this carries only the
+ * missing-field list -- real-data-only rule: no heuristic probability may
+ * ever substitute for a missing trained-model input, and a caller must show
+ * a typed "unavailable" state naming exactly what's missing rather than a
+ * number.
+ */
+export interface UnavailableNextGoalNone {
+  marketId: "nextGoal";
+  selectionId: "none";
+  missingFields: string[];
+  /** Same optional human-readable note AnalysisResult.probabilityContextNote carries -- e.g. from goalHistoryTracker.describeGoalHistoryState -- explaining *why* (ambiguous transition, goals already on the board, etc). Undefined for callers that don't supply one. */
+  contextNote?: string;
+}
 
 /**
  * The trained model's own two probabilities, exactly as ml/predict.py names

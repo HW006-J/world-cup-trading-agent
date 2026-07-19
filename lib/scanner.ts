@@ -16,6 +16,7 @@ import type {
   Match,
   MatchDataProvider,
   Signal,
+  UnavailableNextGoalNone,
 } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -141,14 +142,25 @@ function withContextNote(analysis: AnalysisResult, contextNote: string | undefin
   return contextNote === undefined ? analysis : { ...analysis, probabilityContextNote: contextNote };
 }
 
+/** True for a genuine AnalysisResult (a real, honestly-sourced probability) as opposed to an UnavailableNextGoalNone. */
+export function isAnalysisResult(result: AnalysisResult | UnavailableNextGoalNone): result is AnalysisResult {
+  return "fairProbability" in result;
+}
+
 /**
  * Single entry point for turning (match, market, selection, odds) into an
- * AnalysisResult. Uses the trained model only for market "nextGoal",
- * selection "none", and only when every required live input is genuinely
- * available (see deriveLiveFeatures) -- otherwise (including any model
- * internal failure, defensively) falls back to the original, byte-for-byte
- * unmodified lib/engine.ts heuristic. Every other market/selection always
- * goes straight to the heuristic, unchanged.
+ * AnalysisResult -- or, for nextGoal/none specifically, an
+ * UnavailableNextGoalNone when the trained model's required live inputs
+ * aren't genuinely available this cycle (see deriveLiveFeatures).
+ *
+ * Real-data-only rule: no heuristic probability is ever substituted for a
+ * missing trained-model input. nextGoal/none is EITHER scored by the trained
+ * model (every required input genuinely available) OR reported as
+ * UnavailableNextGoalNone naming exactly what's missing -- lib/engine.ts's
+ * heuristic is never consulted for this market/selection, in any
+ * circumstance. Every other market/selection always goes straight to the
+ * heuristic, unchanged (and is never reachable from the live TxLINE
+ * provider -- see lib/txline/marketRestriction.ts).
  */
 export function analyzeSelection(
   match: Match,
@@ -158,7 +170,7 @@ export function analyzeSelection(
   goalHistory?: readonly GoalHistoryPoint[],
   /** Optional human-readable note (e.g. from goalHistoryTracker.describeGoalHistoryState) attached to the result as probabilityContextNote -- purely explanatory, never affects any computation. */
   contextNote?: string,
-): AnalysisResult {
+): AnalysisResult | UnavailableNextGoalNone {
   if (marketId === "nextGoal" && selectionId === "none") {
     // contextNote is only ever meaningful for this one market/selection --
     // attaching it here (both branches) rather than on the function's final
@@ -171,13 +183,16 @@ export function analyzeSelection(
         return withContextNote(buildTrainedModelAnalysis(match, decimalOdds, liveFeatures.input), contextNote);
       } catch (error) {
         // deriveLiveFeatures() already guarantees finite raw inputs, so a
-        // ModelInferenceError here should be unreachable in practice -- kept
-        // as a hard backstop (requirement 13: no non-finite probability may
-        // reach the scanner/UI) rather than a routine code path.
+        // ModelInferenceError here should be unreachable in practice. A
+        // genuinely unexpected error is rethrown rather than silently
+        // treated as "unavailable"; only a ModelInferenceError itself falls
+        // through to the unavailable result below rather than the heuristic
+        // (requirement 13: no non-finite probability may reach the UI).
         if (!(error instanceof ModelInferenceError)) throw error;
+        return { marketId: "nextGoal", selectionId: "none", missingFields: [], contextNote };
       }
     }
-    return withContextNote(computeAnalysis(match, marketId, selectionId, decimalOdds), contextNote);
+    return { marketId: "nextGoal", selectionId: "none", missingFields: liveFeatures.missingFields, contextNote };
   }
   return computeAnalysis(match, marketId, selectionId, decimalOdds);
 }
@@ -201,6 +216,14 @@ export interface ScanResult {
   best: Opportunity | null;
   /** The single best-ranked opportunity overall, qualifying or not. Used to explain a NO TRADE result. */
   closest: Opportunity | null;
+  /**
+   * nextGoal/none had a real, currently-published price, but the trained
+   * model's required live inputs weren't genuinely available this cycle --
+   * distinct from "market not published at all" (which simply produces no
+   * opportunity and no entry here). Never populated with a heuristic
+   * probability standing in for the missing model output.
+   */
+  unavailable: UnavailableNextGoalNone[];
 }
 
 /** Exported so lib/monitoring/liveScan.ts can correctly re-rank opportunities after its trained-model-only actionability gate changes some signals from BUY to PASS, without a second, driftable copy of this ordering. */
@@ -226,6 +249,7 @@ export function scanMatch(
   contextNote?: string,
 ): ScanResult {
   const opportunities: Opportunity[] = [];
+  const unavailable: UnavailableNextGoalNone[] = [];
 
   for (const market of markets) {
     const selections = provider.getSelections(match, market.id);
@@ -233,15 +257,19 @@ export function scanMatch(
     for (const selection of selections) {
       const odds = oddsBySelection[selection.id];
       if (odds === undefined) continue;
-      const analysis = analyzeSelection(match, market.id, selection.id, odds, goalHistory, contextNote);
-      opportunities.push({
-        marketId: market.id,
-        marketLabel: market.label,
-        selectionId: selection.id,
-        selectionLabel: selection.label,
-        odds,
-        analysis,
-      });
+      const result = analyzeSelection(match, market.id, selection.id, odds, goalHistory, contextNote);
+      if (isAnalysisResult(result)) {
+        opportunities.push({
+          marketId: market.id,
+          marketLabel: market.label,
+          selectionId: selection.id,
+          selectionLabel: selection.label,
+          odds,
+          analysis: result,
+        });
+      } else {
+        unavailable.push(result);
+      }
     }
   }
 
@@ -250,15 +278,25 @@ export function scanMatch(
   return {
     match,
     marketsScanned: markets.length,
-    outcomesScanned: opportunities.length,
+    // Counts every real, odds-bearing outcome evaluated, whether it produced
+    // a genuine opportunity or an unavailable result -- so "market
+    // unavailable" (outcomesScanned === 0) stays exclusively about there
+    // being no real published price at all, never about the model.
+    outcomesScanned: opportunities.length + unavailable.length,
     opportunities: ranked,
     best: ranked.find((o) => o.analysis.signal === "BUY") ?? null,
     closest: ranked[0] ?? null,
+    unavailable,
   };
 }
 
 /** An opportunity found while scanning across multiple matches, tagged with which one it came from. */
 export interface CrossMatchOpportunity extends Opportunity {
+  match: Match;
+}
+
+/** An UnavailableNextGoalNone found while scanning across multiple matches, tagged with which one it came from. */
+export interface CrossMatchUnavailable extends UnavailableNextGoalNone {
   match: Match;
 }
 
@@ -272,6 +310,8 @@ export interface CrossMatchScanResult {
   best: CrossMatchOpportunity | null;
   /** The single best-ranked opportunity overall across all scanned matches, qualifying or not. */
   closest: CrossMatchOpportunity | null;
+  /** Every match whose nextGoal/none had a real published price but unavailable trained-model inputs this cycle. See ScanResult.unavailable. */
+  unavailable: CrossMatchUnavailable[];
 }
 
 /** Per-fixture goal history + explanatory note, keyed by Match.id -- see lib/monitoring/goalHistoryTracker.ts, the only current producer of this for live TxLINE polling. */
@@ -298,6 +338,7 @@ export function scanAllMatches(
   let marketsScanned = 0;
   let outcomesScanned = 0;
   const opportunities: CrossMatchOpportunity[] = [];
+  const unavailable: CrossMatchUnavailable[] = [];
 
   for (const match of matches) {
     const markets = provider.getSupportedMarkets(match);
@@ -307,6 +348,9 @@ export function scanAllMatches(
     outcomesScanned += scan.outcomesScanned;
     for (const opportunity of scan.opportunities) {
       opportunities.push({ ...opportunity, match });
+    }
+    for (const u of scan.unavailable) {
+      unavailable.push({ ...u, match });
     }
   }
 
@@ -319,5 +363,6 @@ export function scanAllMatches(
     opportunities: ranked,
     best: ranked.find((o) => o.analysis.signal === "BUY") ?? null,
     closest: ranked[0] ?? null,
+    unavailable,
   };
 }

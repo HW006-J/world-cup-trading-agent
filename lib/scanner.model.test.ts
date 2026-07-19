@@ -4,8 +4,8 @@ import { computeAnalysis } from "./engine.ts";
 import { demoProvider, MARKETS } from "./demoData.ts";
 import type { GoalHistoryPoint } from "./model/liveFeatureAdapter.ts";
 import { predictNextGoalNone } from "./model/nextGoalNoneModel.ts";
-import { analyzeSelection, scanMatch } from "./scanner.ts";
-import type { Match } from "./types.ts";
+import { analyzeSelection, isAnalysisResult, scanMatch, type Opportunity } from "./scanner.ts";
+import type { AnalysisResult, Match, UnavailableNextGoalNone } from "./types.ts";
 
 function makeMatch(overrides: Partial<Match> = {}): Match {
   return {
@@ -36,11 +36,23 @@ const AVAILABLE_HISTORY: GoalHistoryPoint[] = [
   { minute: 50, homeScore: 1, awayScore: 1 },
 ];
 
+/** Asserts the result is a genuine AnalysisResult (not UnavailableNextGoalNone) and narrows it for the caller. */
+function expectAnalysis(result: AnalysisResult | UnavailableNextGoalNone): AnalysisResult {
+  assert.ok(isAnalysisResult(result), "expected a genuine AnalysisResult, not an unavailable result");
+  return result;
+}
+
+/** Asserts the result is UnavailableNextGoalNone (not AnalysisResult) and narrows it for the caller. */
+function expectUnavailable(result: AnalysisResult | UnavailableNextGoalNone): UnavailableNextGoalNone {
+  assert.ok(!isAnalysisResult(result), "expected an unavailable result, not a genuine AnalysisResult");
+  return result;
+}
+
 // --- 11. model used only for nextGoal / none --------------------------------
 
 test("analyzeSelection never uses the trained model for matchWinner, even with goal history available", () => {
   const match = makeMatch();
-  const withModel = analyzeSelection(match, "matchWinner", "home", 2.0, AVAILABLE_HISTORY);
+  const withModel = expectAnalysis(analyzeSelection(match, "matchWinner", "home", 2.0, AVAILABLE_HISTORY));
   const heuristicDirect = computeAnalysis(match, "matchWinner", "home", 2.0);
   assert.equal(withModel.probabilitySource, "heuristic_fallback");
   assert.deepEqual(withModel, heuristicDirect);
@@ -48,21 +60,21 @@ test("analyzeSelection never uses the trained model for matchWinner, even with g
 
 test("analyzeSelection never uses the trained model for overUnder, even with goal history available", () => {
   const match = makeMatch();
-  const withModel = analyzeSelection(match, "overUnder", "over", 1.9, AVAILABLE_HISTORY);
+  const withModel = expectAnalysis(analyzeSelection(match, "overUnder", "over", 1.9, AVAILABLE_HISTORY));
   assert.equal(withModel.probabilitySource, "heuristic_fallback");
 });
 
 test("analyzeSelection never uses the trained model for nextGoal/home or nextGoal/away, only nextGoal/none", () => {
   const match = makeMatch();
-  const home = analyzeSelection(match, "nextGoal", "home", 2.1, AVAILABLE_HISTORY);
-  const away = analyzeSelection(match, "nextGoal", "away", 2.4, AVAILABLE_HISTORY);
+  const home = expectAnalysis(analyzeSelection(match, "nextGoal", "home", 2.1, AVAILABLE_HISTORY));
+  const away = expectAnalysis(analyzeSelection(match, "nextGoal", "away", 2.4, AVAILABLE_HISTORY));
   assert.equal(home.probabilitySource, "heuristic_fallback");
   assert.equal(away.probabilitySource, "heuristic_fallback");
 });
 
 test("analyzeSelection uses the trained model for nextGoal/none when live features are available", () => {
   const match = makeMatch();
-  const result = analyzeSelection(match, "nextGoal", "none", 2.6, AVAILABLE_HISTORY);
+  const result = expectAnalysis(analyzeSelection(match, "nextGoal", "none", 2.6, AVAILABLE_HISTORY));
   assert.equal(result.probabilitySource, "trained_model");
   assert.ok(result.modelProbabilities);
 });
@@ -80,35 +92,34 @@ test("every non-nextGoal/none market produces byte-identical output to calling c
     ["nextGoal", "home", 2.0] as const,
     ["nextGoal", "away", 2.5] as const,
   ]) {
-    const viaWrapper = analyzeSelection(match, marketId, selectionId, odds, AVAILABLE_HISTORY);
+    const viaWrapper = expectAnalysis(analyzeSelection(match, marketId, selectionId, odds, AVAILABLE_HISTORY));
     const viaHeuristicDirect = computeAnalysis(match, marketId, selectionId, odds);
     assert.deepEqual(viaWrapper, viaHeuristicDirect, `${marketId}/${selectionId} should be unaffected`);
   }
 });
 
-// --- 10. missing required field causes explicit heuristic fallback ---------
+// --- real-data-only: missing required field produces a typed unavailable result, never a heuristic substitute ---
 
-test("nextGoal/none falls back to the heuristic, unmodified, when no goal history is supplied", () => {
+test("nextGoal/none becomes unavailable (naming time_since_last_goal), never heuristic, when no goal history is supplied", () => {
   const match = makeMatch();
-  const result = analyzeSelection(match, "nextGoal", "none", 2.6); // no goalHistory
-  const heuristicDirect = computeAnalysis(match, "nextGoal", "none", 2.6);
-  assert.equal(result.probabilitySource, "heuristic_fallback");
-  assert.deepEqual(result, heuristicDirect);
-  assert.equal(result.modelProbabilities, undefined);
+  const result = expectUnavailable(analyzeSelection(match, "nextGoal", "none", 2.6)); // no goalHistory
+  assert.equal(result.marketId, "nextGoal");
+  assert.equal(result.selectionId, "none");
+  assert.deepEqual(result.missingFields, ["time_since_last_goal"]);
 });
 
-test("nextGoal/none falls back to the heuristic when history exists but starts with a score already on the board", () => {
+test("nextGoal/none stays unavailable when history exists but starts with a score already on the board", () => {
   const match = makeMatch({ minute: 60, homeScore: 1, awayScore: 1 });
   const historyMissingKickoff: GoalHistoryPoint[] = [{ minute: 40, homeScore: 1, awayScore: 1 }];
-  const result = analyzeSelection(match, "nextGoal", "none", 2.6, historyMissingKickoff);
-  assert.equal(result.probabilitySource, "heuristic_fallback");
+  const result = expectUnavailable(analyzeSelection(match, "nextGoal", "none", 2.6, historyMissingKickoff));
+  assert.deepEqual(result.missingFields, ["time_since_last_goal"]);
 });
 
 // --- trained-model output matches the model module's own computation -------
 
 test("the trained-model AnalysisResult's modelProbabilities match predictNextGoalNone() for the same derived input", () => {
   const match = makeMatch({ minute: 60, homeScore: 1, awayScore: 1, stats: { ...makeMatch().stats, redCards: [0, 1] } });
-  const result = analyzeSelection(match, "nextGoal", "none", 2.6, AVAILABLE_HISTORY);
+  const result = expectAnalysis(analyzeSelection(match, "nextGoal", "none", 2.6, AVAILABLE_HISTORY));
   assert.equal(result.probabilitySource, "trained_model");
   const expected = predictNextGoalNone({
     minute: 60,
@@ -130,15 +141,13 @@ test("the trained-model AnalysisResult's modelProbabilities match predictNextGoa
 
 // --- 13. no non-finite probability can reach the scanner or UI -------------
 
-test("a match with a non-finite minute never produces a non-finite probability, edge, or confidence", () => {
+test("a match with a non-finite minute never reaches the trained model -- nextGoal/none becomes unavailable instead", () => {
   const match = makeMatch({ minute: Number.NaN });
-  // The heuristic itself has no special guard against NaN minute, so this
-  // exercises analyzeSelection's fallback path for nextGoal/none, and
-  // documents (rather than silently accepting) whatever the heuristic does
-  // for other markets -- the trained-model path specifically must never be
-  // the source of a NaN here.
-  const result = analyzeSelection(match, "nextGoal", "none", 2.6, AVAILABLE_HISTORY);
-  assert.equal(result.probabilitySource, "heuristic_fallback");
+  // nextGoal/none must become unavailable (never a NaN-tainted model
+  // probability, and never a heuristic substitute either) --
+  // deriveLiveFeatures itself flags "minute" as missing.
+  const result = expectUnavailable(analyzeSelection(match, "nextGoal", "none", 2.6, AVAILABLE_HISTORY));
+  assert.ok(result.missingFields.includes("minute"));
 });
 
 // --- scanMatch threads goalHistory only where it matters --------------------
@@ -158,11 +167,18 @@ test("scanMatch threads goalHistory through to nextGoal/none only, leaving other
   const nextGoalNoneWith = scanWithHistory.opportunities.find(
     (o) => o.marketId === "nextGoal" && o.selectionId === "none",
   );
-  const nextGoalNoneWithout = scanWithoutHistory.opportunities.find(
+  assert.equal(nextGoalNoneWith?.analysis.probabilitySource, "trained_model");
+
+  // Without a goal history, nextGoal/none is never an Opportunity at all --
+  // it's reported as unavailable instead (real-data-only rule: no heuristic
+  // substitute for a missing trained-model input).
+  const nextGoalNoneWithoutOpportunity = scanWithoutHistory.opportunities.find(
     (o) => o.marketId === "nextGoal" && o.selectionId === "none",
   );
-  assert.equal(nextGoalNoneWith?.analysis.probabilitySource, "trained_model");
-  assert.equal(nextGoalNoneWithout?.analysis.probabilitySource, "heuristic_fallback");
+  assert.equal(nextGoalNoneWithoutOpportunity, undefined);
+  const nextGoalNoneWithoutUnavailable = scanWithoutHistory.unavailable.find((u) => u.selectionId === "none");
+  assert.ok(nextGoalNoneWithoutUnavailable);
+  assert.ok(nextGoalNoneWithoutUnavailable.missingFields.includes("time_since_last_goal"));
 
   for (const o of scanWithHistory.opportunities) {
     if (o.marketId === "nextGoal" && o.selectionId === "none") continue;
@@ -170,14 +186,23 @@ test("scanMatch threads goalHistory through to nextGoal/none only, leaving other
   }
 });
 
-test("scanMatch over a demo match with no goal history keeps the existing heuristic-driven scan behaviour", () => {
-  // Regression check for the pre-existing "bra-arg" BUY scenario
-  // (lib/scanner.test.ts): demo mode genuinely has no goal history, so this
-  // must still resolve via the heuristic fallback, not the trained model.
+test("scanMatch over a demo match with no goal history never lets nextGoal/none reach a heuristic BUY", () => {
+  // Regression check for the pre-existing "bra-arg" fixture (lib/scanner.test.ts
+  // used to document its nextGoal/none price as a heuristic-driven BUY
+  // scenario) -- under the real-data-only rule, demo mode genuinely has no
+  // goal history, so nextGoal/none must now be unavailable, never in
+  // opportunities, and never the scan's best/closest.
   const match = demoProvider.getMatches().find((m) => m.id === "bra-arg");
   assert.ok(match);
   const scan = scanMatch(match, demoProvider, MARKETS);
-  assert.equal(scan.best?.marketId, "nextGoal");
-  assert.equal(scan.best?.selectionId, "none");
-  assert.equal(scan.best?.analysis.probabilitySource, "heuristic_fallback");
+
+  const nextGoalNoneOpportunity = scan.opportunities.find(
+    (o) => o.marketId === "nextGoal" && o.selectionId === "none",
+  );
+  assert.equal(nextGoalNoneOpportunity, undefined, "nextGoal/none must never be a heuristic-sourced opportunity");
+  assert.ok(scan.unavailable.some((u) => u.selectionId === "none"));
+
+  const isNextGoalNone = (o: Opportunity) => o.marketId === "nextGoal" && o.selectionId === "none";
+  assert.ok(!scan.best || !isNextGoalNone(scan.best), "nextGoal/none must never be the scan's actionable best");
+  assert.ok(!scan.closest || !isNextGoalNone(scan.closest), "nextGoal/none must never be the scan's closest either");
 });

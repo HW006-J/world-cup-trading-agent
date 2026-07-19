@@ -8,6 +8,18 @@ export class BuildPaperTradeError extends Error {
 }
 
 /**
+ * Maximum age (ms) a live snapshot's own timestamp (ProviderMeta.asOf,
+ * threaded through here as marketOddsAsOf) may be before a trade built from
+ * it is refused as stale. Generous relative to the live poll cadence (5s --
+ * see lib/monitoring/reducer.ts's POLL_INTERVAL_MS, not imported here to
+ * keep this domain module independent of the monitoring layer) to tolerate
+ * normal network/render jitter, while still refusing to open a trade against
+ * odds that are meaningfully out of date (trading condition: "fresh market
+ * timestamp").
+ */
+export const MARKET_FRESHNESS_THRESHOLD_MS = 30_000;
+
+/**
  * Builds a new open paper trade record from an analysed opportunity and a
  * stake. Refuses (throws BuildPaperTradeError) rather than silently
  * creating a trade when any of PitchEdge v1's real-data preconditions
@@ -43,6 +55,14 @@ export function buildPaperTrade(params: {
     throw new BuildPaperTradeError(
       "Refusing to create a trade: the trained model's prediction was unavailable for this match " +
         `(${analysis.probabilityContextNote ?? "reason unknown"}). No heuristic-fallback trade is ever created.`,
+    );
+  }
+
+  const marketOddsAgeMs = Date.now() - new Date(marketOddsAsOf).getTime();
+  if (!Number.isFinite(marketOddsAgeMs) || marketOddsAgeMs > MARKET_FRESHNESS_THRESHOLD_MS) {
+    throw new BuildPaperTradeError(
+      `Refusing to create a trade: the live market snapshot this price came from is stale (marketOddsAsOf=${marketOddsAsOf}). ` +
+        "A trade can only be opened against a fresh live snapshot -- please close and check again.",
     );
   }
 

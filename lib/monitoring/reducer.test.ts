@@ -77,6 +77,7 @@ function makeScan(
     opportunities,
     best,
     closest: closest !== undefined ? closest : best,
+    unavailable: [],
   };
 }
 

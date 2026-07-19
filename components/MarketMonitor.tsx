@@ -10,12 +10,13 @@ import {
   formatOdds,
   formatPercent,
   formatPp,
+  formatTimestamp,
   probabilitySourceLabel,
 } from "@/lib/format";
 import { buildVerdictNarrative } from "@/lib/narrative";
 import { POLL_INTERVAL_MS, type MonitorRunState } from "@/lib/monitoring/reducer";
 import { useMarketMonitor } from "@/lib/monitoring/useMarketMonitor";
-import type { CrossMatchOpportunity, ScanResult } from "@/lib/scanner";
+import type { CrossMatchOpportunity, CrossMatchUnavailable, ScanResult } from "@/lib/scanner";
 import type { PaperTrade } from "@/lib/types";
 
 // Only the very first alert gets the dramatic "Scanning…" reveal — later
@@ -176,7 +177,7 @@ function HeroCard({
           <p className="text-sm font-semibold tabular-nums text-foreground">{formatOdds(opportunity.odds)}</p>
         </div>
         <div className="rounded-md border border-border bg-surface-elevated p-2">
-          <p className="text-[11px] text-muted">Fair odds</p>
+          <p className="text-[11px] text-muted">GoalEdge fair odds</p>
           <p className="text-sm font-semibold tabular-nums text-foreground">{fairOdds}</p>
         </div>
       </div>
@@ -355,13 +356,22 @@ function AgentColumn({
 }
 
 /** Right column: real provenance + match facts + the model's own top contributing factors, in the GoalEdge numbered-step visual language -- never a fabricated settlement/wallet flow. */
-function ModelContextColumn({ opportunity }: { opportunity: CrossMatchOpportunity | null }) {
+function ModelContextColumn({
+  opportunity,
+  missingInputEntry,
+}: {
+  opportunity: CrossMatchOpportunity | null;
+  missingInputEntry: CrossMatchUnavailable | null;
+}) {
   if (!opportunity) {
     return (
       <>
         <SectionLabel tone="accent">Model context</SectionLabel>
         <div className="rounded-lg border border-border bg-surface-elevated p-3 text-center text-[11px] text-muted">
-          No model comparison is available yet.
+          <p>No model comparison is available yet.</p>
+          {missingInputEntry ? (
+            <p className="mt-1.5">Missing model input: {missingInputEntry.missingFields.join(", ") || "unknown"}.</p>
+          ) : null}
         </div>
       </>
     );
@@ -513,6 +523,17 @@ export function MarketMonitor({
   const marketUnavailable =
     matchesMonitored > 0 && !!state.latestScan && state.latestScan.outcomesScanned === 0;
 
+  // Real published nextGoal/none odds exist, but the trained model's inputs
+  // aren't genuinely available this cycle -- distinct from both "no live
+  // matches" and "market unavailable" (real-data-only rule: never a
+  // heuristic substitute, always a typed, explained "missing" state).
+  // Prefers the selected match's own entry so the message matches whichever
+  // fixture is actually focused; falls back to the first one otherwise.
+  const missingInputEntry =
+    (selectedMatchId && state.latestScan?.unavailable.find((u) => u.match.id === selectedMatchId)) ||
+    state.latestScan?.unavailable[0] ||
+    null;
+
   const alertedOpportunity: CrossMatchOpportunity | null = state.alertedScan
     ? (state.alertedScan.best ?? state.alertedScan.closest)
     : null;
@@ -525,6 +546,7 @@ export function MarketMonitor({
           opportunities: state.alertedScan.opportunities,
           best: state.alertedScan.best,
           closest: state.alertedScan.closest,
+          unavailable: state.alertedScan.unavailable,
         }
       : null;
 
@@ -539,6 +561,7 @@ export function MarketMonitor({
         opportunities: [manualReview],
         best: manualReview,
         closest: manualReview,
+        unavailable: [],
       }
     : null;
 
@@ -579,26 +602,34 @@ export function MarketMonitor({
               </div>
               <p className="mt-0.5 text-[11px] text-muted">
                 Live TxLINE market &middot; scanned every {Math.round(POLL_INTERVAL_MS / 1000)}s
+                {providerMeta?.asOf ? ` · Last data ${formatTimestamp(providerMeta.asOf)}` : ""}
               </p>
             </div>
 
             {currentOpportunity ? (
               <HeroCard opportunity={currentOpportunity} onReview={setManualReview} />
             ) : (
-              <p className="py-10 text-center text-sm text-muted">
-                {isIdle
-                  ? "Monitoring is not active. Start monitoring to scan live matches for a next-goal edge."
-                  : matchesMonitored === 0
-                    ? NO_LIVE_MATCHES_TEXT
-                    : marketUnavailable
-                      ? NO_MARKET_TEXT
-                      : "Monitoring is active. Scanning…"}
-              </p>
+              <div className="flex flex-col items-center gap-1.5 py-10 text-center text-sm text-muted">
+                <p>
+                  {isIdle
+                    ? "Monitoring is not active. Start monitoring to scan live matches for a next-goal edge."
+                    : matchesMonitored === 0
+                      ? NO_LIVE_MATCHES_TEXT
+                      : marketUnavailable
+                        ? NO_MARKET_TEXT
+                        : missingInputEntry
+                          ? `Missing model input: ${missingInputEntry.missingFields.join(", ") || "unknown"}.`
+                          : "Monitoring is active. Scanning…"}
+                </p>
+                {!isIdle && missingInputEntry && !marketUnavailable && matchesMonitored > 0 && missingInputEntry.contextNote ? (
+                  <p className="text-[11px] text-muted">{missingInputEntry.contextNote}</p>
+                ) : null}
+              </div>
             )}
           </div>
 
           <div className="flex flex-col gap-3 bg-background p-4">
-            <ModelContextColumn opportunity={currentOpportunity} />
+            <ModelContextColumn opportunity={currentOpportunity} missingInputEntry={missingInputEntry} />
           </div>
         </div>
 

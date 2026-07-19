@@ -17,6 +17,7 @@ const EMPTY_SCAN_RESULT: CrossMatchScanResult = {
   opportunities: [],
   best: null,
   closest: null,
+  unavailable: [],
 };
 
 const DATA_ERROR_MESSAGE = "Live data is temporarily unavailable.";

@@ -4,7 +4,7 @@ import { readFile, access } from "node:fs/promises";
 import path from "node:path";
 import { describeProbabilityContextNote, probabilitySourceLabel } from "./format.ts";
 import { restrictToTrainedModelActionability } from "./monitoring/liveScan.ts";
-import { analyzeSelection, type CrossMatchScanResult } from "./scanner.ts";
+import { analyzeSelection, isAnalysisResult, type CrossMatchScanResult } from "./scanner.ts";
 import type { Match } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -103,6 +103,7 @@ test("restrictToTrainedModelActionability neuters a heuristic-sourced BUY to PAS
     ],
     best: null,
     closest: null,
+    unavailable: [],
   };
   // best/closest deliberately left inconsistent with opportunities above to
   // prove the function recomputes them rather than trusting the input.
@@ -142,6 +143,7 @@ test("restrictToTrainedModelActionability leaves a trained-model BUY untouched",
     ],
     best: null,
     closest: null,
+    unavailable: [],
   };
   const restricted = restrictToTrainedModelActionability(scan);
   assert.equal(restricted.opportunities[0].analysis.signal, "BUY");
@@ -242,7 +244,44 @@ test("a finished match's nextGoal/none never signals BUY, even when sourced from
     totalGoalsLine: 2.5,
   };
   const history = [{ minute: 0, homeScore: 0, awayScore: 0 }];
-  const analysis = analyzeSelection(match, "nextGoal", "none", 1.05, history); // extreme odds that would otherwise guarantee BUY
-  assert.equal(analysis.probabilitySource, "trained_model");
-  assert.equal(analysis.signal, "PASS", "a finished match must never be tradeable, regardless of edge");
+  const result = analyzeSelection(match, "nextGoal", "none", 1.05, history); // extreme odds that would otherwise guarantee BUY
+  assert.ok(isAnalysisResult(result));
+  assert.equal(result.probabilitySource, "trained_model");
+  assert.equal(result.signal, "PASS", "a finished match must never be tradeable, regardless of edge");
+});
+
+// --- no hard-coded probability, score, or price ever reaches the page ------
+
+test("the live dashboard components never contain leftover hard-coded prototype teams or odds", async () => {
+  // Regression guard for the removed GoalEdge prototype's fabricated values
+  // (hardcoded France/England score, invented decimal odds like 2.20/1.65/5.0
+  // for a pool that was never real) -- these must never reappear in the
+  // production dashboard components.
+  const suspiciousLiterals = ["France", "Brazil", "Argentina v", "2.20", "1.65"];
+  for (const file of ["components/MarketMonitor.tsx", "components/RecommendationModal.tsx", "components/HistoricalAnalysis.tsx"]) {
+    const source = await readSource(file);
+    for (const literal of suspiciousLiterals) {
+      assert.ok(!source.includes(literal), `${file} must not contain the leftover prototype literal "${literal}"`);
+    }
+  }
+});
+
+test("MarketMonitor renders match score/minute from real Match fields, never a literal number", async () => {
+  const source = await readSource("components/MarketMonitor.tsx");
+  assert.ok(source.includes("match.homeScore") && source.includes("match.awayScore") && source.includes("match.minute"));
+});
+
+// --- no secrets are ever logged by the live diagnostic ----------------------
+
+test("the live TxLINE diagnostic script never logs a credential value", async () => {
+  const source = await readSource("scripts/txline-diagnostic.ts");
+  // Every console.* call's template literal must never directly interpolate
+  // the token/guestToken/apiToken variables themselves.
+  const consoleCalls = source.match(/console\.(log|warn|error)\([^)]*\)/g) ?? [];
+  assert.ok(consoleCalls.length > 0, "expected the script to log some progress output");
+  for (const call of consoleCalls) {
+    assert.ok(!/\$\{\s*(guestToken|apiToken|auth\.guestToken|auth\.apiToken|token)\s*\}/.test(call), `a console call must never interpolate a credential value directly: ${call}`);
+  }
+  // The script must also never call authHeaders()/JSON.stringify(auth) inside a console call.
+  assert.ok(!/console\.\w+\([^)]*authHeaders/.test(source));
 });

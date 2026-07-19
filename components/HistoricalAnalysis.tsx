@@ -6,7 +6,7 @@ import { ExplainabilityPanel } from "./ExplainabilityPanel";
 import { formatPercent } from "@/lib/format";
 import { deriveLiveFeatures } from "@/lib/model/liveFeatureAdapter";
 import { explainInference, NEXT_GOAL_NONE_MODEL, type NextGoalNoneModelInput } from "@/lib/model/nextGoalNoneModel";
-import { analyzeSelection } from "@/lib/scanner";
+import { analyzeSelection, isAnalysisResult } from "@/lib/scanner";
 import type { Match } from "@/lib/types";
 import type { HistoricalFixtureDetail, HistoricalFixtureSummary } from "@/lib/historical/types";
 
@@ -216,7 +216,11 @@ function ModelOnlyAnalysis({
   // using the exact same analyzeSelection() pipeline live monitoring uses,
   // never a second/parallel calculation.
   const realOdds = detail.latestNextGoalNoneOdds;
-  const analysisWithOdds = realOdds !== null ? analyzeSelection(match, "nextGoal", "none", realOdds, detail.state.goalHistory) : null;
+  // liveFeatures.available is already guaranteed true by the caller (see
+  // HistoricalFixtureView below), so this is always a genuine AnalysisResult
+  // in practice -- isAnalysisResult narrows the type rather than asserting it.
+  const rawAnalysis = realOdds !== null ? analyzeSelection(match, "nextGoal", "none", realOdds, detail.state.goalHistory) : null;
+  const analysisWithOdds = rawAnalysis && isAnalysisResult(rawAnalysis) ? rawAnalysis : null;
 
   return (
     <div className="flex flex-col gap-3">

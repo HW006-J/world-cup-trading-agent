@@ -12,6 +12,7 @@ const EMPTY_SCAN: CrossMatchScanResult = {
   opportunities: [],
   best: null,
   closest: null,
+  unavailable: [],
 };
 
 function qualifyingScan(): CrossMatchScanResult {
@@ -63,6 +64,7 @@ function qualifyingScan(): CrossMatchScanResult {
     opportunities: [opportunity],
     best: opportunity,
     closest: opportunity,
+    unavailable: [],
   };
 }
 

@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { demoProvider } from "./demoData.ts";
-import { analyzeSelection } from "./scanner.ts";
-import { BuildPaperTradeError, buildPaperTrade, settleTrade } from "./trade.ts";
+import { BuildPaperTradeError, MARKET_FRESHNESS_THRESHOLD_MS, buildPaperTrade, settleTrade } from "./trade.ts";
 import type { AnalysisResult, PaperTrade } from "./types.ts";
 
 function makeOpenTrade(overrides: Partial<PaperTrade> = {}): PaperTrade {
@@ -89,7 +88,8 @@ function trainedModelAnalysis(overrides: Partial<AnalysisResult> = {}): Analysis
   };
 }
 
-test("buildPaperTrade succeeds for nextGoal/none sourced from the trained model with real odds", () => {
+test("buildPaperTrade succeeds for nextGoal/none sourced from the trained model with real, fresh odds", () => {
+  const freshAsOf = new Date().toISOString();
   const trade = buildPaperTrade({
     match: MATCH,
     marketLabel: "Next Team to Score",
@@ -97,21 +97,58 @@ test("buildPaperTrade succeeds for nextGoal/none sourced from the trained model 
     selectionLabel: "No further goals",
     analysis: trainedModelAnalysis(),
     stake: 10,
-    marketOddsAsOf: "2026-07-18T12:00:00.000Z",
+    marketOddsAsOf: freshAsOf,
   });
   assert.equal(trade.marketId, "nextGoal");
   assert.equal(trade.selectionId, "none");
   assert.equal(trade.provenance.provider, "txline_live");
   assert.equal(trade.provenance.probabilitySource, "trained_model");
   assert.equal(trade.provenance.fixtureId, MATCH.id);
-  assert.equal(trade.provenance.marketOddsAsOf, "2026-07-18T12:00:00.000Z");
+  assert.equal(trade.provenance.marketOddsAsOf, freshAsOf);
 });
 
-test("buildPaperTrade refuses a heuristic-fallback (insufficient history) analysis -- no trade is created", () => {
-  // Real demo match, real analyzeSelection() call, no goal history supplied
-  // (matches production reality: no history -> heuristic fallback).
-  const analysis = analyzeSelection(MATCH, "nextGoal", "none", 2.6);
-  assert.equal(analysis.probabilitySource, "heuristic_fallback");
+test("buildPaperTrade refuses a stale market snapshot -- fresh market timestamp is a trading condition", () => {
+  const staleAsOf = new Date(Date.now() - (MARKET_FRESHNESS_THRESHOLD_MS + 1000)).toISOString();
+  assert.throws(
+    () =>
+      buildPaperTrade({
+        match: MATCH,
+        marketLabel: "Next Team to Score",
+        selectionId: "none",
+        selectionLabel: "No further goals",
+        analysis: trainedModelAnalysis(),
+        stake: 10,
+        marketOddsAsOf: staleAsOf,
+      }),
+    BuildPaperTradeError,
+  );
+});
+
+test("buildPaperTrade refuses an unparsable market timestamp rather than treating it as fresh", () => {
+  assert.throws(
+    () =>
+      buildPaperTrade({
+        match: MATCH,
+        marketLabel: "Next Team to Score",
+        selectionId: "none",
+        selectionLabel: "No further goals",
+        analysis: trainedModelAnalysis(),
+        stake: 10,
+        marketOddsAsOf: "not-a-real-timestamp",
+      }),
+    BuildPaperTradeError,
+  );
+});
+
+test("buildPaperTrade refuses a heuristic-fallback analysis -- no trade is created", () => {
+  // analyzeSelection() itself can no longer produce a heuristic_fallback
+  // AnalysisResult for nextGoal/none (a missing trained-model input now
+  // yields UnavailableNextGoalNone, not a heuristic substitute -- see
+  // lib/scanner.model.test.ts). This exercises buildPaperTrade's own
+  // defence-in-depth precondition directly against a synthetic
+  // heuristic_fallback-shaped analysis, proving it refuses one regardless of
+  // how it was constructed.
+  const analysis = trainedModelAnalysis({ probabilitySource: "heuristic_fallback", modelProbabilities: undefined });
   assert.throws(
     () =>
       buildPaperTrade({

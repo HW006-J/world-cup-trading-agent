@@ -86,11 +86,19 @@ function liveMatches() {
 test("scanAllMatches over live matches ranks the strongest opportunity, tagged with its own match", () => {
   const scan = scanAllMatches(liveMatches(), demoProvider);
   assert.ok(scan.best, "expected a qualifying cross-match opportunity");
-  assert.equal(scan.best?.match.id, "bra-arg");
+  // bra-arg's nextGoal/none previously won this here on a heuristic-sourced
+  // BUY -- under the real-data-only rule, demo mode has no goal history, so
+  // nextGoal/none is unavailable there instead (see scanner.model.test.ts),
+  // and eng-fra's matchWinner/home BUY is the strongest remaining opportunity.
+  assert.equal(scan.best?.match.id, "eng-fra");
   assert.equal(scan.best?.match.status, "live");
-  assert.equal(scan.best?.marketId, "nextGoal");
-  assert.equal(scan.best?.selectionId, "none");
+  assert.equal(scan.best?.marketId, "matchWinner");
+  assert.equal(scan.best?.selectionId, "home");
   assert.equal(scan.best?.analysis.signal, "BUY");
+  assert.ok(
+    scan.unavailable.some((u) => u.match.id === "bra-arg"),
+    "bra-arg's nextGoal/none should be reported as unavailable, not silently dropped",
+  );
 });
 
 test("scanAllMatches over live matches excludes the finished match entirely", () => {

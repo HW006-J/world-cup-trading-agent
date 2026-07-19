@@ -3,7 +3,7 @@ import type { Match, MarketDefinition, MarketId, MarketSelection, MatchDataProvi
 import { assertTxLineCredentials } from "../dataSource.ts";
 import { getFixturesSnapshot, getOddsSnapshot, getScoresSnapshot, startGuestSession, type TxLineAuth } from "./client.ts";
 import { restrictToTradeableMarket } from "./marketRestriction.ts";
-import { normalizeFixture, normalizeOdds, normalizeScore } from "./normalize.ts";
+import { computeElapsedMinutes, normalizeFixture, normalizeOdds, normalizeScore } from "./normalize.ts";
 import type { RawScoresEntry } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -25,10 +25,11 @@ interface FixtureSnapshot {
   oddsByMarket: Partial<Record<MarketId, OddsBySelection>>;
 }
 
-function applyScore(match: Match, scoreEntries: RawScoresEntry[]): Match {
+function applyScore(match: Match, scoreEntries: RawScoresEntry[], kickoffMs: number): Match {
   // Snapshot endpoints return a list of events; the most recent one wins.
   const latest = scoreEntries.at(-1);
-  const normalized = latest ? normalizeScore(latest) : null;
+  if (!latest) return match;
+  const normalized = normalizeScore(latest);
   if (!normalized) return match;
   return {
     ...match,
@@ -36,6 +37,7 @@ function applyScore(match: Match, scoreEntries: RawScoresEntry[]): Match {
     homeScore: normalized.homeScore,
     awayScore: normalized.awayScore,
     stats: { ...match.stats, ...normalized.stats },
+    minute: computeElapsedMinutes(latest.ts, kickoffMs),
   };
 }
 
@@ -92,7 +94,12 @@ export async function createTxLineProvider(): Promise<MatchDataProvider> {
       totalGoalsLine: totalGoalsLine ?? 2.5,
     };
 
-    snapshots.push({ match: applyScore(baseMatch, rawScores), markets, selectionsByMarket, oddsByMarket });
+    snapshots.push({
+      match: applyScore(baseMatch, rawScores, rawFixture.StartTime),
+      markets,
+      selectionsByMarket,
+      oddsByMarket,
+    });
   }
 
   const asOf = new Date().toISOString();

@@ -2,14 +2,16 @@ import "server-only";
 import type { RawFixture, RawOddsPayload, RawScoresEntry, RawTokenResponse } from "./types.ts";
 
 // ---------------------------------------------------------------------------
-// Dormant TxLINE HTTP client.
+// TxLINE HTTP client.
 //
 // Server-only (see the `server-only` import above — Next.js turns this into
-// a build error if any of this ever ends up in a client bundle). Nothing in
-// this file is invoked by the running app yet: demo mode is the only
-// operational mode until TXLINE_API_TOKEN is configured. See lib/dataSource.ts
-// for the mode switch and lib/txline/provider.ts for the (also dormant)
-// factory that would call these functions.
+// a build error if any of this ever ends up in a client bundle). Actively
+// used on every request: app/api/txline/snapshot/route.ts unconditionally
+// calls lib/txline/provider.ts's createTxLineProvider(), which calls every
+// function in this file to fetch the real, live TxLINE snapshot -- there is
+// no demo-mode switch or dormant path left in the production route. See
+// lib/dataSource.ts's assertTxLineCredentials() for the one precondition
+// (TXLINE_API_TOKEN configured) that gates this.
 //
 // Endpoints, headers and base URL are taken from the official TxLINE OpenAPI
 // spec (https://txline.txodds.com/docs/docs.yaml, v1.5.6).
