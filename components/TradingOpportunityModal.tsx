@@ -28,6 +28,7 @@ export function TradingOpportunityModal({
   homeScore,
   awayScore,
   minute,
+  snapshotLabel,
   modelProbabilityAnotherGoal,
   marketProbability,
   decimalOdds,
@@ -43,6 +44,8 @@ export function TradingOpportunityModal({
   homeScore: number;
   awayScore: number;
   minute: number;
+  /** The named snapshot the trade is placed at (e.g. "70'") -- stored on the trade as placedAtSnapshot for settlement/display. */
+  snapshotLabel: string;
   modelProbabilityAnotherGoal: number;
   marketProbability: number;
   decimalOdds: number;
@@ -71,6 +74,7 @@ export function TradingOpportunityModal({
         homeTeam,
         awayTeam,
         replayMinute: minute,
+        placedAtSnapshot: snapshotLabel,
         homeScore,
         awayScore,
         modelProbability: modelProbabilityAnotherGoal,

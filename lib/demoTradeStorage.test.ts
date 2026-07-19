@@ -38,6 +38,7 @@ function genuineDemoTrade(overrides: Partial<DemoPaperTrade> = {}): DemoPaperTra
     homeTeam: "France",
     awayTeam: "Croatia",
     replayMinute: 75,
+    placedAtSnapshot: "75'",
     homeScore: 4,
     awayScore: 2,
     marketId: "nextGoal",
@@ -51,12 +52,51 @@ function genuineDemoTrade(overrides: Partial<DemoPaperTrade> = {}): DemoPaperTra
     mode: "demo_replay",
     provider: "historical_txline",
     marketPriceSource: "simulated_demo",
+    status: "open",
+    settledAtMinute: null,
+    payout: null,
+    profitLoss: null,
+    settlementReason: null,
     ...overrides,
   };
 }
 
-test("loadStoredDemoTrades keeps a genuine demo-trade record", () => {
+function wonDemoTrade(overrides: Partial<DemoPaperTrade> = {}): DemoPaperTrade {
+  return genuineDemoTrade({
+    status: "won",
+    settledAtMinute: 78,
+    payout: 17.9,
+    profitLoss: 7.9,
+    settlementReason: "Another goal was scored at 78'.",
+    ...overrides,
+  });
+}
+
+test("loadStoredDemoTrades keeps a genuine OPEN demo-trade record", () => {
   const trade = genuineDemoTrade();
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
+  assert.deepEqual(loadStoredDemoTrades(), [trade]);
+});
+
+test("requirement 12: a settled (WON) trade survives a reload -- refresh never turns it back into OPEN", () => {
+  const trade = wonDemoTrade();
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
+  const reloaded = loadStoredDemoTrades();
+  assert.equal(reloaded[0].status, "won");
+  assert.equal(reloaded[0].settledAtMinute, 78);
+  assert.equal(reloaded[0].payout, 17.9);
+  assert.equal(reloaded[0].profitLoss, 7.9);
+  assert.equal(reloaded[0].settlementReason, "Another goal was scored at 78'.");
+});
+
+test("requirement 12: a settled (LOST) trade survives a reload", () => {
+  const trade = genuineDemoTrade({
+    status: "lost",
+    settledAtMinute: 94,
+    payout: 0,
+    profitLoss: -10,
+    settlementReason: "No further goal was scored before full time.",
+  });
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
   assert.deepEqual(loadStoredDemoTrades(), [trade]);
 });
@@ -65,6 +105,24 @@ test("loadStoredDemoTrades still keeps an existing legacy 'none'-selection demo 
   const trade = genuineDemoTrade({ selectionId: "none" });
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
   assert.deepEqual(loadStoredDemoTrades(), [trade]);
+});
+
+test("loadStoredDemoTrades rejects a record whose status isn't one of open/won/lost", () => {
+  const trade = { ...genuineDemoTrade(), status: "pending" };
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
+  assert.deepEqual(loadStoredDemoTrades(), []);
+});
+
+test("loadStoredDemoTrades rejects an OPEN record that carries stray settlement fields (internally inconsistent)", () => {
+  const trade = genuineDemoTrade({ status: "open", payout: 25 });
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
+  assert.deepEqual(loadStoredDemoTrades(), []);
+});
+
+test("loadStoredDemoTrades rejects a WON/LOST record missing a required settlement field", () => {
+  const trade = { ...wonDemoTrade(), settlementReason: undefined };
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify([trade]));
+  assert.deepEqual(loadStoredDemoTrades(), []);
 });
 
 test("loadStoredDemoTrades rejects a record missing demo provenance fields", () => {
@@ -106,8 +164,8 @@ test("loadStoredDemoTrades persists the filtered list back so junk doesn't resur
   assert.deepEqual(persisted, [trade]);
 });
 
-test("saveStoredDemoTrades then loadStoredDemoTrades round-trips genuine demo trades", () => {
-  const trades = [genuineDemoTrade({ id: "a" }), genuineDemoTrade({ id: "b" })];
+test("saveStoredDemoTrades then loadStoredDemoTrades round-trips genuine demo trades, open and settled alike", () => {
+  const trades = [genuineDemoTrade({ id: "a" }), wonDemoTrade({ id: "b" })];
   saveStoredDemoTrades(trades);
   assert.deepEqual(loadStoredDemoTrades(), trades);
 });

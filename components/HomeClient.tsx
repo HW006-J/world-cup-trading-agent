@@ -11,7 +11,7 @@ import { loadStoredTrades, saveStoredTrades } from "@/lib/tradeStorage";
 import { loadStoredDemoTrades, saveStoredDemoTrades } from "@/lib/demoTradeStorage";
 import { formatTimestamp } from "@/lib/format";
 import { EDGE_THRESHOLD_PP } from "@/lib/tradingThresholds";
-import type { DemoPaperTrade } from "@/lib/demoTrade";
+import { applyDemoTradeSettlement, type DemoPaperTrade, type DemoSettlementResult } from "@/lib/demoTrade";
 import type { PaperTrade } from "@/lib/types";
 
 const TOAST_DURATION_MS = 2500;
@@ -102,6 +102,14 @@ export function HomeClient() {
     });
   }
 
+  function handleSettleDemoTrade(tradeId: string, settlement: DemoSettlementResult) {
+    setDemoTrades((prev) => {
+      const next = applyDemoTradeSettlement(prev, tradeId, settlement);
+      saveStoredDemoTrades(next);
+      return next;
+    });
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <Header connection={connection} />
@@ -148,7 +156,12 @@ export function HomeClient() {
         </div>
 
         {activeTab === "historical" ? (
-          <HistoricalAnalysis onRecordDemoTrade={handleRecordDemoTrade} launchToken={historicalLaunchToken} />
+          <HistoricalAnalysis
+            demoTrades={demoTrades}
+            onRecordDemoTrade={handleRecordDemoTrade}
+            onSettleDemoTrade={handleSettleDemoTrade}
+            launchToken={historicalLaunchToken}
+          />
         ) : null}
 
         {activeTab === "trades" ? <TradeHistory trades={trades} demoTrades={demoTrades} /> : null}
