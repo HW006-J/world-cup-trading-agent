@@ -136,3 +136,7 @@ This application is a hackathon demo. All matches, odds, statistics and probabil
 - No settlement engine — seeded trades have fixed illustrative outcomes; new trades stay "open" and are never auto-settled.
 - No authentication, database, or multi-user support.
 - No on-chain activation flow (`/api/token/activate`) is implemented — obtaining `TXLINE_API_TOKEN` is out of scope for this app and must happen separately.
+
+## Technical documentation
+
+[Read the GoalEdge technical brief](docs/GoalEdge_Technical_Brief.pdf)
