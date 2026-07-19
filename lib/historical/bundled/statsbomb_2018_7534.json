@@ -1,0 +1,195 @@
+{
+  "source": "statsbomb_open_data_bundled",
+  "sourceAttribution": "Data provided by StatsBomb (https://github.com/hudl/open-data), used under StatsBomb's Open Data licence for public, non-commercial, educational and research use with attribution. This is a derived summary (scores, goal timings, red cards) of that public dataset, not TxLINE data.",
+  "fixtureId": "statsbomb_2018_7534",
+  "homeParticipantId": 770,
+  "awayParticipantId": 794,
+  "homeName": "Germany",
+  "awayName": "Mexico",
+  "competitionStage": "Group Stage",
+  "matchDate": "2018-06-17",
+  "finalHomeScore": 0,
+  "finalAwayScore": 1,
+  "finalMinute": 93.16666666666667,
+  "latestNextGoalNoneOdds": null,
+  "state": {
+    "minute": 93.16666666666667,
+    "homeScore": 0,
+    "awayScore": 1,
+    "redCardsHome": 0,
+    "redCardsAway": 0,
+    "goalHistory": [
+      {
+        "minute": 0,
+        "homeScore": 0,
+        "awayScore": 0
+      },
+      {
+        "minute": 34.53333333333333,
+        "homeScore": 0,
+        "awayScore": 1
+      }
+    ],
+    "redCardsObserved": true
+  },
+  "snapshots": [
+    {
+      "label": "15'",
+      "minute": 15,
+      "homeScore": 0,
+      "awayScore": 0,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "30'",
+      "minute": 30,
+      "homeScore": 0,
+      "awayScore": 0,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "45'",
+      "minute": 45,
+      "homeScore": 0,
+      "awayScore": 1,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        },
+        {
+          "minute": 34.53333333333333,
+          "homeScore": 0,
+          "awayScore": 1
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "60'",
+      "minute": 60,
+      "homeScore": 0,
+      "awayScore": 1,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        },
+        {
+          "minute": 34.53333333333333,
+          "homeScore": 0,
+          "awayScore": 1
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "70'",
+      "minute": 70,
+      "homeScore": 0,
+      "awayScore": 1,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        },
+        {
+          "minute": 34.53333333333333,
+          "homeScore": 0,
+          "awayScore": 1
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "75'",
+      "minute": 75,
+      "homeScore": 0,
+      "awayScore": 1,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        },
+        {
+          "minute": 34.53333333333333,
+          "homeScore": 0,
+          "awayScore": 1
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "80'",
+      "minute": 80,
+      "homeScore": 0,
+      "awayScore": 1,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        },
+        {
+          "minute": 34.53333333333333,
+          "homeScore": 0,
+          "awayScore": 1
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "Full time",
+      "minute": 93.16666666666667,
+      "homeScore": 0,
+      "awayScore": 1,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        },
+        {
+          "minute": 34.53333333333333,
+          "homeScore": 0,
+          "awayScore": 1
+        }
+      ],
+      "redCardsObserved": true
+    }
+  ]
+}

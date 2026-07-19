@@ -1,21 +1,21 @@
 {
   "source": "statsbomb_open_data_bundled",
   "sourceAttribution": "Data provided by StatsBomb (https://github.com/hudl/open-data), used under StatsBomb's Open Data licence for public, non-commercial, educational and research use with attribution. This is a derived summary (scores, goal timings, red cards) of that public dataset, not TxLINE data.",
-  "fixtureId": "statsbomb_2018_8658",
-  "homeParticipantId": 771,
-  "awayParticipantId": 785,
-  "homeName": "France",
-  "awayName": "Croatia",
-  "competitionStage": "Final",
-  "matchDate": "2018-07-15",
-  "finalHomeScore": 4,
-  "finalAwayScore": 2,
-  "finalMinute": 95.05,
+  "fixtureId": "statsbomb_2018_7554",
+  "homeParticipantId": 768,
+  "awayParticipantId": 798,
+  "homeName": "England",
+  "awayName": "Panama",
+  "competitionStage": "Group Stage",
+  "matchDate": "2018-06-24",
+  "finalHomeScore": 6,
+  "finalAwayScore": 1,
+  "finalMinute": 94.38333333333334,
   "latestNextGoalNoneOdds": null,
   "state": {
-    "minute": 95.05,
-    "homeScore": 4,
-    "awayScore": 2,
+    "minute": 94.38333333333334,
+    "homeScore": 6,
+    "awayScore": 1,
     "redCardsHome": 0,
     "redCardsAway": 0,
     "goalHistory": [
@@ -25,34 +25,39 @@
         "awayScore": 0
       },
       {
-        "minute": 17.933333333333334,
+        "minute": 7.8,
         "homeScore": 1,
         "awayScore": 0
       },
       {
-        "minute": 27.883333333333333,
-        "homeScore": 1,
-        "awayScore": 1
-      },
-      {
-        "minute": 37.93333333333333,
+        "minute": 21.583333333333332,
         "homeScore": 2,
-        "awayScore": 1
+        "awayScore": 0
       },
       {
-        "minute": 58.55,
+        "minute": 35.15,
         "homeScore": 3,
-        "awayScore": 1
+        "awayScore": 0
       },
       {
-        "minute": 64.6,
+        "minute": 39.233333333333334,
         "homeScore": 4,
-        "awayScore": 1
+        "awayScore": 0
       },
       {
-        "minute": 68.13333333333334,
-        "homeScore": 4,
-        "awayScore": 2
+        "minute": 45.266666666666666,
+        "homeScore": 5,
+        "awayScore": 0
+      },
+      {
+        "minute": 61.083333333333336,
+        "homeScore": 6,
+        "awayScore": 0
+      },
+      {
+        "minute": 77.26666666666667,
+        "homeScore": 6,
+        "awayScore": 1
       }
     ],
     "redCardsObserved": true
@@ -61,7 +66,7 @@
     {
       "label": "15'",
       "minute": 15,
-      "homeScore": 0,
+      "homeScore": 1,
       "awayScore": 0,
       "redCardsHome": 0,
       "redCardsAway": 0,
@@ -70,6 +75,11 @@
           "minute": 0,
           "homeScore": 0,
           "awayScore": 0
+        },
+        {
+          "minute": 7.8,
+          "homeScore": 1,
+          "awayScore": 0
         }
       ],
       "redCardsObserved": true
@@ -77,8 +87,8 @@
     {
       "label": "30'",
       "minute": 30,
-      "homeScore": 1,
-      "awayScore": 1,
+      "homeScore": 2,
+      "awayScore": 0,
       "redCardsHome": 0,
       "redCardsAway": 0,
       "goalHistory": [
@@ -88,14 +98,14 @@
           "awayScore": 0
         },
         {
-          "minute": 17.933333333333334,
+          "minute": 7.8,
           "homeScore": 1,
           "awayScore": 0
         },
         {
-          "minute": 27.883333333333333,
-          "homeScore": 1,
-          "awayScore": 1
+          "minute": 21.583333333333332,
+          "homeScore": 2,
+          "awayScore": 0
         }
       ],
       "redCardsObserved": true
@@ -103,8 +113,8 @@
     {
       "label": "45'",
       "minute": 45,
-      "homeScore": 2,
-      "awayScore": 1,
+      "homeScore": 4,
+      "awayScore": 0,
       "redCardsHome": 0,
       "redCardsAway": 0,
       "goalHistory": [
@@ -114,19 +124,24 @@
           "awayScore": 0
         },
         {
-          "minute": 17.933333333333334,
+          "minute": 7.8,
           "homeScore": 1,
           "awayScore": 0
         },
         {
-          "minute": 27.883333333333333,
-          "homeScore": 1,
-          "awayScore": 1
+          "minute": 21.583333333333332,
+          "homeScore": 2,
+          "awayScore": 0
         },
         {
-          "minute": 37.93333333333333,
-          "homeScore": 2,
-          "awayScore": 1
+          "minute": 35.15,
+          "homeScore": 3,
+          "awayScore": 0
+        },
+        {
+          "minute": 39.233333333333334,
+          "homeScore": 4,
+          "awayScore": 0
         }
       ],
       "redCardsObserved": true
@@ -134,7 +149,140 @@
     {
       "label": "60'",
       "minute": 60,
-      "homeScore": 3,
+      "homeScore": 5,
+      "awayScore": 0,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        },
+        {
+          "minute": 7.8,
+          "homeScore": 1,
+          "awayScore": 0
+        },
+        {
+          "minute": 21.583333333333332,
+          "homeScore": 2,
+          "awayScore": 0
+        },
+        {
+          "minute": 35.15,
+          "homeScore": 3,
+          "awayScore": 0
+        },
+        {
+          "minute": 39.233333333333334,
+          "homeScore": 4,
+          "awayScore": 0
+        },
+        {
+          "minute": 45.266666666666666,
+          "homeScore": 5,
+          "awayScore": 0
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "70'",
+      "minute": 70,
+      "homeScore": 6,
+      "awayScore": 0,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        },
+        {
+          "minute": 7.8,
+          "homeScore": 1,
+          "awayScore": 0
+        },
+        {
+          "minute": 21.583333333333332,
+          "homeScore": 2,
+          "awayScore": 0
+        },
+        {
+          "minute": 35.15,
+          "homeScore": 3,
+          "awayScore": 0
+        },
+        {
+          "minute": 39.233333333333334,
+          "homeScore": 4,
+          "awayScore": 0
+        },
+        {
+          "minute": 45.266666666666666,
+          "homeScore": 5,
+          "awayScore": 0
+        },
+        {
+          "minute": 61.083333333333336,
+          "homeScore": 6,
+          "awayScore": 0
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "75'",
+      "minute": 75,
+      "homeScore": 6,
+      "awayScore": 0,
+      "redCardsHome": 0,
+      "redCardsAway": 0,
+      "goalHistory": [
+        {
+          "minute": 0,
+          "homeScore": 0,
+          "awayScore": 0
+        },
+        {
+          "minute": 7.8,
+          "homeScore": 1,
+          "awayScore": 0
+        },
+        {
+          "minute": 21.583333333333332,
+          "homeScore": 2,
+          "awayScore": 0
+        },
+        {
+          "minute": 35.15,
+          "homeScore": 3,
+          "awayScore": 0
+        },
+        {
+          "minute": 39.233333333333334,
+          "homeScore": 4,
+          "awayScore": 0
+        },
+        {
+          "minute": 45.266666666666666,
+          "homeScore": 5,
+          "awayScore": 0
+        },
+        {
+          "minute": 61.083333333333336,
+          "homeScore": 6,
+          "awayScore": 0
+        }
+      ],
+      "redCardsObserved": true
+    },
+    {
+      "label": "80'",
+      "minute": 80,
+      "homeScore": 6,
       "awayScore": 1,
       "redCardsHome": 0,
       "redCardsAway": 0,
@@ -145,171 +293,48 @@
           "awayScore": 0
         },
         {
-          "minute": 17.933333333333334,
+          "minute": 7.8,
           "homeScore": 1,
           "awayScore": 0
         },
         {
-          "minute": 27.883333333333333,
-          "homeScore": 1,
-          "awayScore": 1
-        },
-        {
-          "minute": 37.93333333333333,
+          "minute": 21.583333333333332,
           "homeScore": 2,
-          "awayScore": 1
+          "awayScore": 0
         },
         {
-          "minute": 58.55,
+          "minute": 35.15,
           "homeScore": 3,
-          "awayScore": 1
-        }
-      ],
-      "redCardsObserved": true
-    },
-    {
-      "label": "70'",
-      "minute": 70,
-      "homeScore": 4,
-      "awayScore": 2,
-      "redCardsHome": 0,
-      "redCardsAway": 0,
-      "goalHistory": [
-        {
-          "minute": 0,
-          "homeScore": 0,
           "awayScore": 0
         },
         {
-          "minute": 17.933333333333334,
-          "homeScore": 1,
+          "minute": 39.233333333333334,
+          "homeScore": 4,
           "awayScore": 0
         },
         {
-          "minute": 27.883333333333333,
-          "homeScore": 1,
-          "awayScore": 1
-        },
-        {
-          "minute": 37.93333333333333,
-          "homeScore": 2,
-          "awayScore": 1
-        },
-        {
-          "minute": 58.55,
-          "homeScore": 3,
-          "awayScore": 1
-        },
-        {
-          "minute": 64.6,
-          "homeScore": 4,
-          "awayScore": 1
-        },
-        {
-          "minute": 68.13333333333334,
-          "homeScore": 4,
-          "awayScore": 2
-        }
-      ],
-      "redCardsObserved": true
-    },
-    {
-      "label": "75'",
-      "minute": 75,
-      "homeScore": 4,
-      "awayScore": 2,
-      "redCardsHome": 0,
-      "redCardsAway": 0,
-      "goalHistory": [
-        {
-          "minute": 0,
-          "homeScore": 0,
+          "minute": 45.266666666666666,
+          "homeScore": 5,
           "awayScore": 0
         },
         {
-          "minute": 17.933333333333334,
-          "homeScore": 1,
+          "minute": 61.083333333333336,
+          "homeScore": 6,
           "awayScore": 0
         },
         {
-          "minute": 27.883333333333333,
-          "homeScore": 1,
+          "minute": 77.26666666666667,
+          "homeScore": 6,
           "awayScore": 1
-        },
-        {
-          "minute": 37.93333333333333,
-          "homeScore": 2,
-          "awayScore": 1
-        },
-        {
-          "minute": 58.55,
-          "homeScore": 3,
-          "awayScore": 1
-        },
-        {
-          "minute": 64.6,
-          "homeScore": 4,
-          "awayScore": 1
-        },
-        {
-          "minute": 68.13333333333334,
-          "homeScore": 4,
-          "awayScore": 2
-        }
-      ],
-      "redCardsObserved": true
-    },
-    {
-      "label": "80'",
-      "minute": 80,
-      "homeScore": 4,
-      "awayScore": 2,
-      "redCardsHome": 0,
-      "redCardsAway": 0,
-      "goalHistory": [
-        {
-          "minute": 0,
-          "homeScore": 0,
-          "awayScore": 0
-        },
-        {
-          "minute": 17.933333333333334,
-          "homeScore": 1,
-          "awayScore": 0
-        },
-        {
-          "minute": 27.883333333333333,
-          "homeScore": 1,
-          "awayScore": 1
-        },
-        {
-          "minute": 37.93333333333333,
-          "homeScore": 2,
-          "awayScore": 1
-        },
-        {
-          "minute": 58.55,
-          "homeScore": 3,
-          "awayScore": 1
-        },
-        {
-          "minute": 64.6,
-          "homeScore": 4,
-          "awayScore": 1
-        },
-        {
-          "minute": 68.13333333333334,
-          "homeScore": 4,
-          "awayScore": 2
         }
       ],
       "redCardsObserved": true
     },
     {
       "label": "Full time",
-      "minute": 95.05,
-      "homeScore": 4,
-      "awayScore": 2,
+      "minute": 94.38333333333334,
+      "homeScore": 6,
+      "awayScore": 1,
       "redCardsHome": 0,
       "redCardsAway": 0,
       "goalHistory": [
@@ -319,34 +344,39 @@
           "awayScore": 0
         },
         {
-          "minute": 17.933333333333334,
+          "minute": 7.8,
           "homeScore": 1,
           "awayScore": 0
         },
         {
-          "minute": 27.883333333333333,
-          "homeScore": 1,
-          "awayScore": 1
-        },
-        {
-          "minute": 37.93333333333333,
+          "minute": 21.583333333333332,
           "homeScore": 2,
-          "awayScore": 1
+          "awayScore": 0
         },
         {
-          "minute": 58.55,
+          "minute": 35.15,
           "homeScore": 3,
-          "awayScore": 1
+          "awayScore": 0
         },
         {
-          "minute": 64.6,
+          "minute": 39.233333333333334,
           "homeScore": 4,
-          "awayScore": 1
+          "awayScore": 0
         },
         {
-          "minute": 68.13333333333334,
-          "homeScore": 4,
-          "awayScore": 2
+          "minute": 45.266666666666666,
+          "homeScore": 5,
+          "awayScore": 0
+        },
+        {
+          "minute": 61.083333333333336,
+          "homeScore": 6,
+          "awayScore": 0
+        },
+        {
+          "minute": 77.26666666666667,
+          "homeScore": 6,
+          "awayScore": 1
         }
       ],
       "redCardsObserved": true

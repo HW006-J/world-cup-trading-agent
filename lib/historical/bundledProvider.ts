@@ -1,6 +1,5 @@
 import "server-only";
-import { readFile, readdir } from "node:fs/promises";
-import path from "node:path";
+import { BUNDLED_FIXTURES } from "./bundled/manifest.ts";
 import type { HistoricalFixtureDetail } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -13,36 +12,23 @@ import type { HistoricalFixtureDetail } from "./types.ts";
 // ml/data/raw/ read path) -- so a fresh clone/deployment that never ran
 // ml/download_replay.py still has something real to replay, always clearly
 // labelled as bundled StatsBomb data, never as TxLINE.
+//
+// Fixtures are read via lib/historical/bundled/manifest.ts's explicit
+// static JSON imports, never a runtime fs.readdir() scan -- a directory
+// listing done only at request time is invisible to Next.js's build-time
+// file tracing and risks silently missing fixtures in the Vercel serverless
+// bundle (see scripts/generate-bundled-fixture-manifest.ts's own module
+// comment). Regenerate that manifest after adding/removing a fixture file.
 // ---------------------------------------------------------------------------
-
-const BUNDLED_DIR = path.join(process.cwd(), "lib", "historical", "bundled");
 
 export type BundledFixture = HistoricalFixtureDetail & {
   source: "statsbomb_open_data_bundled";
   sourceAttribution: string;
 };
 
-async function readBundledFile(fileName: string): Promise<BundledFixture | null> {
-  try {
-    const raw = await readFile(path.join(BUNDLED_DIR, fileName), "utf-8");
-    const parsed = JSON.parse(raw) as BundledFixture;
-    if (parsed.source !== "statsbomb_open_data_bundled") return null;
-    return parsed;
-  } catch {
-    return null; // missing/unreadable/invalid -- treated as absent, never fabricated
-  }
-}
-
-/** Every bundled fixture committed under lib/historical/bundled/. Returns [] if the directory is empty/missing. */
+/** Every bundled fixture listed in the generated manifest. Never empty for a correctly-generated manifest -- see generate-bundled-fixture-manifest.ts. */
 export async function listBundledFixtures(): Promise<BundledFixture[]> {
-  let fileNames: string[];
-  try {
-    fileNames = (await readdir(BUNDLED_DIR)).filter((f) => f.endsWith(".json"));
-  } catch {
-    return [];
-  }
-  const fixtures = await Promise.all(fileNames.map(readBundledFile));
-  return fixtures.filter((f): f is BundledFixture => f !== null);
+  return BUNDLED_FIXTURES;
 }
 
 /** One bundled fixture's full detail, or null if fixtureId doesn't match any committed bundled fixture. */

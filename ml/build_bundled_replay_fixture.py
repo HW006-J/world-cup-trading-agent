@@ -157,6 +157,11 @@ def build_fixture(match: dict, events: list[dict]) -> dict:
         "finalHomeScore": final["homeScore"],
         "finalAwayScore": final["awayScore"],
         "finalMinute": final["minute"],
+        # Bundled fixtures are derived from StatsBomb's event data, which
+        # carries no market odds at all -- always null (never fabricated),
+        # matching lib/historical/types.ts's HistoricalFixtureSummary shape
+        # exactly so this JSON is directly importable as a BundledFixture.
+        "latestNextGoalNoneOdds": None,
         "state": {
             "minute": final["minute"],
             "homeScore": final["homeScore"],
