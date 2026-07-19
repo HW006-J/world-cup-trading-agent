@@ -6,10 +6,10 @@ import { DemoMarketComparison } from "./DemoMarketComparison";
 import { ReasoningSummary } from "./ModelReasoning";
 import { TradingOpportunityModal } from "./TradingOpportunityModal";
 import { ProbabilityHistoryChart, type GoalMarker, type ProbabilityHistoryPoint } from "./ProbabilityHistoryChart";
-import { formatOdds, formatPercent } from "@/lib/format";
+import { formatMoney, formatOdds, formatPercent } from "@/lib/format";
 import { anotherGoalFairOdds } from "@/lib/anotherGoal";
 import type { DemoDecision } from "@/lib/demoMarket";
-import type { DemoPaperTrade } from "@/lib/demoTrade";
+import type { DemoPaperTrade, DemoSettlementResult } from "@/lib/demoTrade";
 import { deriveLiveFeatures, type GoalHistoryPoint } from "@/lib/model/liveFeatureAdapter";
 import { explainInference, NEXT_GOAL_NONE_MODEL, type NextGoalNoneModelInput } from "@/lib/model/nextGoalNoneModel";
 import { buildComparisonSentence } from "@/lib/model/reasoning";
@@ -19,6 +19,7 @@ import {
   scenarioForSnapshot,
   shouldTriggerOpportunityModal,
 } from "@/lib/historical/replayOpportunity";
+import { selectOpenTradesForFixture, settleDemoTrade } from "@/lib/historical/settlement";
 import { visibleThrough } from "@/lib/historical/progressiveReveal";
 import { resolveHeroFixtureId } from "@/lib/historical/heroFixture";
 import type { Match } from "@/lib/types";
@@ -134,10 +135,16 @@ function buildGoalMarkers(goalHistory: readonly GoalHistoryPoint[]): GoalMarker[
 }
 
 export function HistoricalAnalysis({
+  demoTrades,
   onRecordDemoTrade,
+  onSettleDemoTrade,
   launchToken = 0,
 }: {
+  /** Every currently-stored demo trade (any fixture) -- used only to find this fixture's own still-OPEN trades to (re-)evaluate on every snapshot change; see HistoricalFixtureView's settlement effect. */
+  demoTrades: DemoPaperTrade[];
   onRecordDemoTrade: (trade: DemoPaperTrade) => void;
+  /** Applies a settlement result to one trade by id (see lib/demoTrade.ts's applyDemoTradeSettlement, called by the parent) -- HistoricalAnalysis itself never mutates a trade directly. */
+  onSettleDemoTrade: (tradeId: string, settlement: DemoSettlementResult) => void;
   /**
    * >0 means this mount was triggered by the Live tab's "Run historical
    * replay" CTA (see components/LiveView.tsx / HomeClient.tsx) -- select the
@@ -243,21 +250,45 @@ export function HistoricalAnalysis({
   const activeSource = detail?.source ?? fixtures?.[0]?.source;
   const activeAttribution = detail?.sourceAttribution ?? fixtures?.[0]?.sourceAttribution;
   const labelling = labelForSource(activeSource, activeAttribution);
-  const usingBundledFallback = activeSource === "statsbomb_open_data_bundled";
+
+  // Bundled fixture's subtitle ("Bundled StatsBomb Open Data (2018 FIFA
+  // World Cup) -- not TxLINE, not live, not simulated.") is temporarily
+  // hidden from this UI per product request (2026-07-19) -- Panel's own
+  // subtitle prop simply renders nothing when passed undefined, which also
+  // closes the vertical space it occupied. labelForSource()'s panelSubtitle
+  // string itself is untouched above; this only suppresses it at the render
+  // site for the bundled source. The attribution/licensing text is
+  // separately preserved and unaffected -- see the comment further below.
+  // To restore, change the line below back to
+  // `subtitle={labelling.panelSubtitle}` unconditionally.
+  const visibleSubtitle = activeSource === "statsbomb_open_data_bundled" ? undefined : labelling.panelSubtitle;
 
   return (
-    <Panel title={labelling.panelTitle} subtitle={labelling.panelSubtitle} className="border-2 border-border">
+    <Panel title={labelling.panelTitle} subtitle={visibleSubtitle} className="border-2 border-border">
       <div className="mb-3 flex items-center gap-2">
         <Pill tone="neutral">{labelling.pillLabel}</Pill>
       </div>
-      {labelling.attributionNote ? (
-        <p className="mb-3 text-[11px] text-muted">
-          {usingBundledFallback
-            ? "No real downloaded TxLINE fixtures were found on this machine, so this replay uses a bundled, redistributable fixture instead. "
-            : null}
-          {labelling.attributionNote}
-        </p>
-      ) : null}
+      {/*
+        The long explanatory/licensing paragraph ("No real downloaded TxLINE
+        fixtures were found on this machine..." + labelling.attributionNote)
+        is temporarily hidden from this UI per product request (2026-07-19).
+        The underlying attribution/licensing text is NOT removed from the
+        codebase -- it still lives in labelForSource()'s attributionNote
+        (above) and ml/build_bundled_replay_fixture.py's SOURCE_ATTRIBUTION,
+        and will be placed in Terms and Conditions/documentation separately.
+
+        To restore this paragraph, reinstate:
+          const usingBundledFallback = activeSource === "statsbomb_open_data_bundled";
+        and:
+          {labelling.attributionNote ? (
+            <p className="mb-3 text-[11px] text-muted">
+              {usingBundledFallback
+                ? "No real downloaded TxLINE fixtures were found on this machine, so this replay uses a bundled, redistributable fixture instead. "
+                : null}
+              {labelling.attributionNote}
+            </p>
+          ) : null}
+      */}
 
       {fixtures === null ? (
         listError ? (
@@ -304,7 +335,9 @@ export function HistoricalAnalysis({
               detail={detail}
               selectedMinute={selectedMinute}
               onSelectMinute={setSelectedMinute}
+              demoTrades={demoTrades}
               onRecordDemoTrade={onRecordDemoTrade}
+              onSettleDemoTrade={onSettleDemoTrade}
               initialAutoPlay={heroArmed && detail.fixtureId === heroTargetFixtureId}
             />
           )}
@@ -339,17 +372,30 @@ const NOTICE_DURATION_MS = 2500;
 /** How long the goal-event banner and recommendation-transition callout stay visible -- long enough to read, short enough to keep the pacing tight for a submission-video recording. */
 const EVENT_HIGHLIGHT_DURATION_MS = 4000;
 
+/** How long a settlement result notice (WON/LOST) stays visible -- longer than the plain confirmation toasts, since there's more to read. */
+const SETTLEMENT_NOTICE_DURATION_MS = 6000;
+
+interface SettlementNotice {
+  status: Extract<DemoSettlementResult["status"], "won" | "lost">;
+  reason: string;
+  profitLoss: number;
+}
+
 function HistoricalFixtureView({
   detail,
   selectedMinute,
   onSelectMinute,
+  demoTrades,
   onRecordDemoTrade,
+  onSettleDemoTrade,
   initialAutoPlay,
 }: {
   detail: HistoricalFixtureDetail;
   selectedMinute: number | null;
   onSelectMinute: (minute: number) => void;
+  demoTrades: DemoPaperTrade[];
   onRecordDemoTrade: (trade: DemoPaperTrade) => void;
+  onSettleDemoTrade: (tradeId: string, settlement: DemoSettlementResult) => void;
   /** Consumed exactly once, at mount, via the lazy useState initializer below -- true only when this exact mount was produced by the hero-launch flow (see HistoricalAnalysis's heroArmed/heroTargetFixtureId). */
   initialAutoPlay?: boolean;
 }) {
@@ -361,6 +407,7 @@ function HistoricalFixtureView({
   const [hasTriggeredOpportunity, setHasTriggeredOpportunity] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [settlementNotice, setSettlementNotice] = useState<SettlementNotice | null>(null);
 
   const snapshot = detail.snapshots.find((s) => s.minute === selectedMinute) ?? detail.snapshots[detail.snapshots.length - 1];
   const currentIndex = detail.snapshots.findIndex((s) => s.minute === snapshot?.minute);
@@ -395,6 +442,53 @@ function HistoricalFixtureView({
     return () => clearTimeout(timer);
   }, [notice]);
 
+  useEffect(() => {
+    if (!settlementNotice) return;
+    const timer = setTimeout(() => setSettlementNotice(null), SETTLEMENT_NOTICE_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [settlementNotice]);
+
+  // Settlement: re-evaluated every time the revealed snapshot changes
+  // (autoplay OR a manual click -- both funnel through onSelectMinute, which
+  // is what moves `selectedMinute`/`snapshot` -- so both are handled by this
+  // one effect identically, satisfying "jumping forward settles consistently
+  // using events between placement and the selected snapshot"). Only ever
+  // reads goal events up to `snapshot.minute` (never the fixture's full
+  // future timeline) and only ever (re-)considers trades
+  // selectOpenTradesForFixture() itself still calls "open" -- a trade that
+  // has already settled is structurally excluded, so navigating backwards
+  // afterward can never reopen or reverse it, and a trade can only ever be
+  // settled once from this effect.
+  useEffect(() => {
+    const openTrades = selectOpenTradesForFixture(demoTrades, detail.fixtureId);
+    if (openTrades.length === 0) return;
+
+    const newlySettled: { tradeId: string; settlement: DemoSettlementResult }[] = [];
+    for (const trade of openTrades) {
+      const settlement = settleDemoTrade({
+        selectionId: trade.selectionId,
+        placedAtMinute: trade.replayMinute,
+        stake: trade.stake,
+        acceptedDecimalOdds: trade.demoDecimalOdds,
+        goalHistory: detail.state.goalHistory,
+        revealedThroughMinute: snapshot.minute,
+        fullTimeRevealed: isLastSnapshot,
+        fullTimeMinute: detail.finalMinute,
+      });
+      if (settlement) newlySettled.push({ tradeId: trade.id, settlement });
+    }
+    if (newlySettled.length === 0) return;
+
+    // Deferred (not called synchronously in the effect body) -- mirrors the
+    // autoplay effect's own setTimeout-wrapped setState calls above.
+    const timer = setTimeout(() => {
+      for (const { tradeId, settlement } of newlySettled) onSettleDemoTrade(tradeId, settlement);
+      const last = newlySettled[newlySettled.length - 1].settlement;
+      setSettlementNotice({ status: last.status, reason: last.settlementReason, profitLoss: last.profitLoss });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [currentIndex, snapshot.minute, isLastSnapshot, detail.fixtureId, detail.state.goalHistory, detail.finalMinute, demoTrades, onSettleDemoTrade]);
+
   if (detail.snapshots.length === 0) {
     return <p className="text-sm text-muted">This fixture has no usable reconstructed timeline.</p>;
   }
@@ -414,6 +508,8 @@ function HistoricalFixtureView({
     detail.snapshots.map((s) => s.label),
     currentIndex,
   );
+  const hasOpenTradeAwaitingReplay = selectOpenTradesForFixture(demoTrades, detail.fixtureId).length > 0;
+  const showContinuePrompt = hasTriggeredOpportunity && !effectivelyPlaying && !isLastSnapshot && hasOpenTradeAwaitingReplay;
 
   function selectManually(minute: number) {
     setIsPlaying(false);
@@ -501,6 +597,36 @@ function HistoricalFixtureView({
         ) : null}
       </div>
 
+      {settlementNotice ? (
+        <div
+          role="status"
+          className={`rounded-md border px-3 py-2 text-center ${
+            settlementNotice.status === "won" ? "border-buy/40 bg-buy-soft" : "border-negative/40 bg-negative-soft"
+          }`}
+        >
+          <p className={`text-sm font-black tracking-wide uppercase ${settlementNotice.status === "won" ? "text-buy" : "text-negative"}`}>
+            {settlementNotice.status === "won" ? "WON" : "LOST"}
+          </p>
+          <p className="mt-0.5 text-xs text-foreground">{settlementNotice.reason}</p>
+          <p className={`mt-0.5 text-xs font-semibold ${settlementNotice.status === "won" ? "text-buy" : "text-negative"}`}>
+            {settlementNotice.status === "won" ? "Profit" : "P&L"}: {formatMoney(settlementNotice.profitLoss)}
+          </p>
+        </div>
+      ) : null}
+
+      {showContinuePrompt ? (
+        <div className="flex items-center justify-between gap-2 rounded-md border border-accent/40 bg-accent/10 px-3 py-2">
+          <p className="text-xs text-foreground">An open paper trade is waiting on later events to settle it.</p>
+          <button
+            type="button"
+            onClick={() => setIsPlaying(true)}
+            className="shrink-0 rounded-md bg-accent px-3 py-1.5 text-xs font-bold text-on-accent transition-colors hover:bg-accent/90"
+          >
+            ▶ Continue replay
+          </button>
+        </div>
+      ) : null}
+
       <ProbabilityHistoryChart points={visiblePoints} goals={visibleGoalMarkers} onSelect={selectManually} />
 
       {!liveFeatures.available ? (
@@ -517,6 +643,7 @@ function HistoricalFixtureView({
           homeScore={snapshot.homeScore}
           awayScore={snapshot.awayScore}
           minute={snapshot.minute}
+          snapshotLabel={snapshot.label}
           status={match.status}
           reachedOpportunity={reachedOpportunity}
           justScored={goalAtThisMinute}
@@ -551,6 +678,7 @@ function ModelOnlyAnalysis({
   homeScore,
   awayScore,
   minute,
+  snapshotLabel,
   status,
   reachedOpportunity,
   justScored,
@@ -567,6 +695,8 @@ function ModelOnlyAnalysis({
   homeScore: number;
   awayScore: number;
   minute: number;
+  /** The named snapshot the current minute belongs to (e.g. "70'") -- stored on any trade approved right now as its placedAtSnapshot. */
+  snapshotLabel: string;
   status: Match["status"];
   /** True at/after the automatic opportunity checkpoint (see lib/historical/replayOpportunity.ts) -- decides which demo scenario gap (small PASS vs large TRADE) to show. */
   reachedOpportunity: boolean;
@@ -675,6 +805,7 @@ function ModelOnlyAnalysis({
           homeScore={homeScore}
           awayScore={awayScore}
           minute={minute}
+          snapshotLabel={snapshotLabel}
           modelProbabilityAnotherGoal={anotherGoalPct}
           marketProbability={scenario.marketProbability}
           decimalOdds={scenario.decimalOdds}

@@ -14,6 +14,29 @@ const STORAGE_KEY = "pitchedge.demoPaperTrades.v1";
  * genuine PaperTrade, whose provenance shape is entirely different -- can
  * never resurface here.
  */
+/**
+ * A settled trade must genuinely carry all four settlement fields
+ * (correctly typed); an open one must carry none of them -- catches a
+ * corrupted/partial record (e.g. localStorage edited by hand, or a future
+ * bug) that a bare "is status one of the three strings" check alone
+ * wouldn't.
+ */
+function hasConsistentSettlementFields(t: Partial<DemoPaperTrade>): boolean {
+  if (t.status === "open") {
+    return t.settledAtMinute == null && t.payout == null && t.profitLoss == null && t.settlementReason == null;
+  }
+  return (
+    typeof t.settledAtMinute === "number" &&
+    Number.isFinite(t.settledAtMinute) &&
+    typeof t.payout === "number" &&
+    Number.isFinite(t.payout) &&
+    typeof t.profitLoss === "number" &&
+    Number.isFinite(t.profitLoss) &&
+    typeof t.settlementReason === "string" &&
+    t.settlementReason.length > 0
+  );
+}
+
 function isGenuineDemoTrade(value: unknown): value is DemoPaperTrade {
   if (typeof value !== "object" || value === null) return false;
   const t = value as Partial<DemoPaperTrade>;
@@ -23,6 +46,7 @@ function isGenuineDemoTrade(value: unknown): value is DemoPaperTrade {
     t.fixtureId.length > 0 &&
     typeof t.homeTeam === "string" &&
     typeof t.awayTeam === "string" &&
+    typeof t.placedAtSnapshot === "string" &&
     t.marketId === "nextGoal" &&
     (t.selectionId === "anotherGoal" || t.selectionId === "none") &&
     typeof t.demoDecimalOdds === "number" &&
@@ -33,7 +57,9 @@ function isGenuineDemoTrade(value: unknown): value is DemoPaperTrade {
     Number.isFinite(t.edgePp) &&
     t.mode === "demo_replay" &&
     t.provider === "historical_txline" &&
-    t.marketPriceSource === "simulated_demo"
+    t.marketPriceSource === "simulated_demo" &&
+    (t.status === "open" || t.status === "won" || t.status === "lost") &&
+    hasConsistentSettlementFields(t)
   );
 }
 

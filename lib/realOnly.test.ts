@@ -282,6 +282,7 @@ test("genuine live-trade storage rejects a demo-replay-shaped record, and demo-t
     homeTeam: "France",
     awayTeam: "Croatia",
     replayMinute: 75,
+    placedAtSnapshot: "75'",
     homeScore: 4,
     awayScore: 2,
     marketId: "nextGoal",
@@ -295,6 +296,11 @@ test("genuine live-trade storage rejects a demo-replay-shaped record, and demo-t
     mode: "demo_replay",
     provider: "historical_txline",
     marketPriceSource: "simulated_demo",
+    status: "open",
+    settledAtMinute: null,
+    payout: null,
+    profitLoss: null,
+    settlementReason: null,
   };
 
   const originalWindow = (globalThis as { window?: unknown }).window;
