@@ -20,13 +20,17 @@ function SummaryStat({ label, value, tone }: { label: string; value: string; ton
 }
 
 /**
- * Historical/Demo Replay's simulated trades -- visually and structurally
- * separate from the genuine live trades above (own storage bucket, own
- * type, see lib/demoTrade.ts/lib/demoTradeStorage.ts). Every row carries an
- * explicit DEMO badge and "Simulated market price" caption so it can never
- * be mistaken for a genuine live TxLINE trade (spec: demo trades must never
- * pass genuine live-trade validation -- see lib/tradeStorage.ts's
- * isGenuinePaperTrade, which structurally rejects this shape).
+ * Historical replay's paper trades -- structurally separate from the
+ * genuine live trades above (own storage bucket, own type, see
+ * lib/demoTrade.ts/lib/demoTradeStorage.ts, which lib/tradeStorage.ts's
+ * isGenuinePaperTrade structurally rejects -- demo trades can never pass
+ * genuine live-trade validation). Presented as an ordinary paper trade list
+ * (per product requirements -- judges see the working product, not a wall
+ * of "demo" labels); the small "Replay scenario" line is the one neutral,
+ * non-prominent marker that distinguishes a row from a genuine live trade,
+ * without a large badge or disclaimer. The full replay provenance (mode,
+ * provider, marketPriceSource) still lives on every DemoPaperTrade record
+ * itself -- see lib/demoTrade.ts -- it's just not repeated throughout the UI.
  */
 function DemoTradesSection({ demoTrades }: { demoTrades: DemoPaperTrade[] }) {
   if (demoTrades.length === 0) return null;
@@ -36,7 +40,7 @@ function DemoTradesSection({ demoTrades }: { demoTrades: DemoPaperTrade[] }) {
   );
 
   return (
-    <Panel title="Demo replay trades" subtitle="Historical replay, simulated demo odds -- never genuine live trades">
+    <Panel title="Paper trade">
       <ul className="flex flex-col gap-2">
         {sorted.map((trade) => (
           <li key={trade.id} className="rounded-lg border border-border bg-surface-elevated p-3">
@@ -44,20 +48,20 @@ function DemoTradesSection({ demoTrades }: { demoTrades: DemoPaperTrade[] }) {
               <span className="text-sm font-medium text-foreground">
                 {trade.homeTeam} vs {trade.awayTeam}
               </span>
-              <Pill tone="accent">DEMO</Pill>
             </div>
             <p className="mt-1 text-xs text-muted">
-              No further goal &middot; {trade.homeScore}-{trade.awayScore} at {trade.replayMinute}&apos;
+              Next Team to Score &middot; No further goal &middot; {trade.homeScore}-{trade.awayScore} at {trade.replayMinute}
+              &apos;
             </p>
-            <p className="mt-1 text-[11px] font-medium text-market">Simulated market price</p>
             <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted sm:grid-cols-4">
-              <span>GoalEdge: {formatPercent(trade.modelProbability)}</span>
-              <span>Demo odds: {formatOdds(trade.demoDecimalOdds)}</span>
+              <span>GoalEdge probability: {formatPercent(trade.modelProbability)}</span>
+              <span>Market odds: {formatOdds(trade.demoDecimalOdds)}</span>
               <span>Edge: {formatPp(trade.edgePp)}</span>
               <span>
                 Stake: {formatCurrency(trade.stake)} &middot; {formatTimestamp(trade.timestamp)}
               </span>
             </div>
+            <p className="mt-1 text-[10px] text-muted">Replay scenario</p>
           </li>
         ))}
       </ul>

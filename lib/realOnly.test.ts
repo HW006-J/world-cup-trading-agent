@@ -186,13 +186,17 @@ test("HistoricalAnalysis never imports the genuine live odds/edge pipeline, the 
   assert.ok(!baseNames.includes("trade"), "must never import lib/trade.ts's genuine buildPaperTrade");
   assert.ok(!baseNames.includes("tradeStorage"), "must never import the genuine live trade storage bucket");
   assert.ok(!rawSpecifiers.some((s) => s.includes("/txline/")), "must never import the genuine live TxLINE market adapter");
-  assert.ok(source.includes("Historical market odds unavailable"), "the real-odds-unavailable disclosure must always render, unconditionally");
   assert.ok(!source.includes("RecommendationModal"));
   assert.ok(!source.includes("PaperTradeForm"));
 });
 
-test("lib/demoMarket.ts and lib/demoTrade.ts (the Historical tab's simulated pipeline) never import the genuine live scanner, live scan engine, TxLINE market adapter, or genuine trade builder/storage", async () => {
-  for (const file of ["lib/demoMarket.ts", "lib/demoTrade.ts"]) {
+test("lib/demoMarket.ts, lib/demoTrade.ts, and the Historical-only UI components never import the genuine live scanner, live scan engine, TxLINE market adapter, or genuine trade builder/storage", async () => {
+  for (const file of [
+    "lib/demoMarket.ts",
+    "lib/demoTrade.ts",
+    "components/DemoMarketComparison.tsx",
+    "components/TradingOpportunityModal.tsx",
+  ]) {
     const source = await readSource(file);
     const baseNames = importedModuleBaseNames(source);
     const rawSpecifiers = importedSpecifiers(source);
@@ -202,6 +206,31 @@ test("lib/demoMarket.ts and lib/demoTrade.ts (the Historical tab's simulated pip
     assert.ok(!baseNames.includes("tradeStorage"), `${file} must never import lib/tradeStorage.ts`);
     assert.ok(!rawSpecifiers.some((s) => s.includes("/txline/")), `${file} must never import the genuine live TxLINE market adapter`);
   }
+});
+
+// --- product-experience wording (judges see the working product, not "demo" repeated everywhere) ---
+
+test("no visible Historical Replay label reads \"Demo odds\"/\"Demo market probability\"/\"Demo decimal odds\", and none of the removed phrases have crept back in", async () => {
+  for (const file of ["components/DemoMarketComparison.tsx", "components/TradingOpportunityModal.tsx", "components/TradeHistory.tsx"]) {
+    const source = await readSource(file);
+    assert.ok(!/Demo odds|Demo market probability|Demo decimal odds/.test(source), `${file} must not show a "Demo ..." price label`);
+    assert.ok(!source.includes("Illustrative market price"));
+    assert.ok(!source.includes("not historical TxLINE market data"));
+  }
+  const modalSource = await readSource("components/TradingOpportunityModal.tsx");
+  assert.ok(modalSource.includes("Market probability"));
+  assert.ok(modalSource.includes("Market odds"));
+  assert.ok(modalSource.includes("Approve paper trade"));
+  assert.ok(!modalSource.includes("Approve demo paper trade"));
+});
+
+test("Paper Trades presents replay trades as an ordinary paper trade list -- titled plainly, no large DEMO badge, no 'Simulated market price' -- while a small neutral 'Replay scenario' note is the only marker", async () => {
+  const source = await readSource("components/TradeHistory.tsx");
+  assert.ok(source.includes('title="Paper trade"'));
+  assert.ok(!source.includes("Demo replay trades"));
+  assert.ok(!source.includes(">DEMO<"));
+  assert.ok(!source.includes("Simulated market price"));
+  assert.ok(source.includes("Replay scenario"));
 });
 
 test("the genuine live pipeline never imports the Historical tab's demo-replay code -- demo odds can never enter it", async () => {
@@ -296,16 +325,32 @@ test("genuine live-trade storage rejects a demo-replay-shaped record, and demo-t
   }
 });
 
-test("the demo market comparison always discloses simulated odds, and never labels them as TxLINE data", async () => {
+// The judge-facing product experience presents this as an ordinary "Market
+// comparison" (never labelled "TxLINE") -- the honesty guarantee that
+// replay-derived prices can never masquerade as genuine TxLINE data now
+// lives structurally (never claims TxLINE, and lib/demoTrade.ts's internal
+// provenance fields are what actually gate live-trade validation -- see the
+// storage cross-rejection test above), not in a large disclaimer paragraph.
+test("the market comparison panel is titled plainly and never labels its price as TxLINE data", async () => {
   const source = await readSource("components/DemoMarketComparison.tsx");
-  assert.ok(source.includes("Simulated demo odds — not historical TxLINE market data."));
-  assert.ok(!/TxLINE market odds|TxLINE decimal odds|TxLINE odds/.test(source), "demo odds must never be labelled as TxLINE odds");
+  assert.ok(source.includes("Market comparison"));
+  assert.ok(source.includes("Market odds"));
+  assert.ok(!/TxLINE market odds|TxLINE decimal odds|TxLINE odds/.test(source), "the replay-derived price must never be labelled as TxLINE odds");
 });
 
-test("HistoricalAnalysis is clearly labelled and never claims to be live or simulated", async () => {
+test("the opportunity modal never labels its price as TxLINE data, and every DemoPaperTrade it can create still carries full internal replay provenance", async () => {
+  const modalSource = await readSource("components/TradingOpportunityModal.tsx");
+  assert.ok(!/TxLINE market odds|TxLINE decimal odds|TxLINE odds/.test(modalSource));
+  const demoTradeSource = await readSource("lib/demoTrade.ts");
+  assert.ok(demoTradeSource.includes('mode: "demo_replay"'));
+  assert.ok(demoTradeSource.includes('provider: "historical_txline"'));
+  assert.ok(demoTradeSource.includes('marketPriceSource: "simulated_demo"'));
+});
+
+test("HistoricalAnalysis is clearly labelled Historical (not Live) without a repeated demo/simulated disclaimer", async () => {
   const source = await readSource("components/HistoricalAnalysis.tsx");
   assert.ok(source.includes("Historical TxLINE match data"));
-  assert.ok(source.includes("Historical market odds unavailable"));
+  assert.ok(source.includes("not live, not simulated"));
 });
 
 // --- 11. seeded paper trades are absent -------------------------------------

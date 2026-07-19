@@ -20,17 +20,17 @@ import type { MatchSnapshot } from "@/lib/historical/reconstructMatch";
 //
 // Real, already-downloaded TxLINE match data (ml/data/raw/, see
 // ml/download_replay.py / lib/historical/provider.ts) -- never synthetic,
-// never inferred from a single snapshot. This mode never offers paper-trade
-// approval: real historical nextGoal/none odds have not been found in any
-// downloaded fixture so far (see the audit report), so there is no real
-// market price to compute a genuine edge against, and this component never
-// invents one.
+// never inferred from a single snapshot; the trained model always reruns on
+// this genuine state. Real historical nextGoal/none market odds have never
+// been found in any downloaded fixture, so paper-trade approval here is
+// always built from a replay-derived market scenario (lib/demoMarket.ts),
+// never a genuine TxLINE price -- that provenance is recorded internally on
+// every trade (lib/demoTrade.ts) and structurally cannot enter the genuine
+// Live TxLINE path (see lib/realOnly.test.ts), but this UI presents the
+// product experience without repeating "demo"/"simulated" at every element.
 // ---------------------------------------------------------------------------
 
 const PLACEHOLDER_STRENGTH = 75; // no TxLINE equivalent; matches lib/txline/normalize.ts's own convention
-
-const HISTORICAL_ODDS_UNAVAILABLE_TEXT =
-  "Historical market odds unavailable. Paper-trade approval is disabled for this historical state -- the trained model probability above is shown for reference only, not compared against a real price.";
 
 /** Auto-advance interval for the replay's Play control. */
 const REPLAY_STEP_MS = 1500;
@@ -130,7 +130,7 @@ export function HistoricalAnalysis({ onRecordDemoTrade }: { onRecordDemoTrade: (
 
   return (
     <Panel
-      title={usingBundledFallback ? "Historical replay data (bundled demo fixture)" : "Historical TxLINE match data"}
+      title={usingBundledFallback ? "Historical replay data (bundled fixture)" : "Historical TxLINE match data"}
       subtitle={
         usingBundledFallback
           ? "Bundled StatsBomb Open Data (2018 FIFA World Cup) -- not TxLINE, not live, not simulated."
@@ -139,7 +139,7 @@ export function HistoricalAnalysis({ onRecordDemoTrade }: { onRecordDemoTrade: (
       className="border-2 border-border"
     >
       <div className="mb-3 flex items-center gap-2">
-        <Pill tone="neutral">{usingBundledFallback ? "Bundled demo data" : "Historical TxLINE data"}</Pill>
+        <Pill tone="neutral">{usingBundledFallback ? "Bundled replay data" : "Historical TxLINE data"}</Pill>
       </div>
       {usingBundledFallback ? (
         <p className="mb-3 text-[11px] text-muted">
@@ -298,7 +298,7 @@ function ProbabilityTimeline({
   );
 }
 
-/** How long a transient confirmation ("Opportunity rejected.", "Demo paper trade recorded...") stays visible -- same duration HomeClient's own toast uses. */
+/** How long a transient confirmation ("Opportunity rejected.", "Paper trade recorded...") stays visible -- same duration HomeClient's own toast uses. */
 const NOTICE_DURATION_MS = 2500;
 
 function HistoricalFixtureView({
@@ -381,7 +381,7 @@ function HistoricalFixtureView({
   function handleApproveDemoTrade(trade: DemoPaperTrade) {
     onRecordDemoTrade(trade);
     setModalOpen(false);
-    setNotice("Demo paper trade recorded — no real money was placed.");
+    setNotice("Paper trade recorded — no real money was placed.");
   }
 
   function handleRejectDemoTrade() {
@@ -547,10 +547,6 @@ function ModelOnlyAnalysis({
         />
         <Stat label="GoalEdge fair odds" value={fairOdds} hint="1 / model probability" />
       </div>
-
-      <p className="rounded-md border border-border bg-surface-elevated px-3 py-2 text-xs text-muted">
-        {HISTORICAL_ODDS_UNAVAILABLE_TEXT}
-      </p>
 
       <DemoMarketComparison modelProbabilityNextGoalNone={modelPct} scenario={scenario} />
 

@@ -68,11 +68,11 @@ export function buildDemoPaperTrade(params: {
 
   if (!(edgePp > EDGE_THRESHOLD_PP)) {
     throw new BuildDemoPaperTradeError(
-      `Refusing to create a demo trade: this scenario's edge (${edgePp.toFixed(1)}pp) does not clear the +${EDGE_THRESHOLD_PP}pp threshold.`,
+      `Refusing to create a trade: this scenario's edge (${edgePp.toFixed(1)}pp) does not clear the +${EDGE_THRESHOLD_PP}pp threshold.`,
     );
   }
   if (!Number.isFinite(stake) || stake <= 0) {
-    throw new BuildDemoPaperTradeError("Refusing to create a demo trade: stake must be a positive number.");
+    throw new BuildDemoPaperTradeError("Refusing to create a trade: stake must be a positive number.");
   }
 
   return {

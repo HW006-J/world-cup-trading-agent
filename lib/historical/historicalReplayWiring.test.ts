@@ -128,14 +128,24 @@ test("selecting a different fixture remounts the whole replay (and therefore its
   assert.ok(source.includes("key={detail.fixtureId}"));
 });
 
-// --- 12. simulated demo odds remain clearly disclosed -----------------------
+// --- 12. replay provenance stays internal, never a repeated visible "demo" disclaimer ---
 
-test("the simulated-odds disclosure is present in both the persistent demo market panel and the popup itself", async () => {
+test("the market panel and popup present the product experience (no large simulated-odds disclaimer, no TxLINE mislabel), while replay provenance stays fully intact internally on every trade", async () => {
   const comparisonSource = await readSource("components/DemoMarketComparison.tsx");
   const modalSource = await readSource("components/TradingOpportunityModal.tsx");
-  const disclosure = "Simulated demo odds — not historical TxLINE market data.";
-  assert.ok(comparisonSource.includes(disclosure));
-  assert.ok(modalSource.includes(disclosure));
+  const removedDisclosure = "Simulated demo odds — not historical TxLINE market data.";
+  assert.ok(!comparisonSource.includes(removedDisclosure), "the old large disclosure paragraph must not reappear in the market panel");
+  assert.ok(!modalSource.includes(removedDisclosure), "the old large disclosure paragraph must not reappear in the popup");
+  assert.ok(!/TxLINE market odds|TxLINE decimal odds|TxLINE odds/.test(comparisonSource));
+  assert.ok(!/TxLINE market odds|TxLINE decimal odds|TxLINE odds/.test(modalSource));
+
+  // The internal provenance that actually gates live-trade validation
+  // (lib/tradeStorage.ts's isGenuinePaperTrade, lib/demoTradeStorage.ts's
+  // isGenuineDemoTrade) is never deleted or falsified -- see lib/demoTrade.ts.
+  const demoTradeSource = await readSource("lib/demoTrade.ts");
+  assert.ok(demoTradeSource.includes('mode: "demo_replay"'));
+  assert.ok(demoTradeSource.includes('provider: "historical_txline"'));
+  assert.ok(demoTradeSource.includes('marketPriceSource: "simulated_demo"'));
 });
 
 // --- 13. Live mode remains unchanged and cannot receive demo odds ----------

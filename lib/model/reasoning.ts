@@ -267,7 +267,7 @@ export function buildFullReasonRows(contributions: readonly FeatureContribution[
     });
 }
 
-/** "GoalEdge estimates a X% chance of no further goal, compared with the demo market's Y% implied probability." */
+/** "GoalEdge estimates a X% chance of no further goal, compared with the market's Y% implied probability." */
 export function buildComparisonSentence(modelProbabilityNextGoalNone: number, marketProbability: number): string {
-  return `GoalEdge estimates a ${formatPercent(modelProbabilityNextGoalNone)} chance of no further goal, compared with the demo market's ${formatPercent(marketProbability)} implied probability.`;
+  return `GoalEdge estimates a ${formatPercent(modelProbabilityNextGoalNone)} chance of no further goal, compared with the market's ${formatPercent(marketProbability)} implied probability.`;
 }

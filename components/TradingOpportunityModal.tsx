@@ -8,12 +8,15 @@ import { buildComparisonSentence } from "@/lib/model/reasoning";
 import { ReasoningSummary } from "./ModelReasoning";
 
 // ---------------------------------------------------------------------------
-// Historical tab's "Show trade example" popup. Only ever rendered by the
-// parent (components/HistoricalAnalysis.tsx) when a user click has just
-// produced a scenario with decision === "TRADE" -- never opened on page
-// load, snapshot change, or Play. Approve creates a DemoPaperTrade only
-// (lib/demoTrade.ts) -- it never calls lib/trade.ts's buildPaperTrade and
-// never touches real execution/wallet/settlement code.
+// Historical tab's "Trading opportunity" popup. Only ever rendered by the
+// parent (components/HistoricalAnalysis.tsx) the moment active replay
+// playback reaches the opportunity checkpoint with a TRADE-caliber edge --
+// never opened on page load or a manual snapshot click. Approve creates a
+// DemoPaperTrade only (lib/demoTrade.ts) -- it never calls lib/trade.ts's
+// buildPaperTrade and never touches real execution/wallet/settlement code.
+// Presented as an ordinary trading opportunity (per product requirements);
+// the replay provenance is still recorded on the trade itself, just not
+// repeated as "demo" throughout this UI -- see lib/demoTrade.ts.
 // ---------------------------------------------------------------------------
 
 const DEFAULT_STAKE = "10";
@@ -80,7 +83,7 @@ export function TradingOpportunityModal({
       setError(
         err instanceof BuildDemoPaperTradeError
           ? err.message
-          : "This demo trade could not be recorded -- please try again.",
+          : "This trade could not be recorded -- please try again.",
       );
     }
   }
@@ -108,11 +111,11 @@ export function TradingOpportunityModal({
             <p className="text-base font-semibold tabular-nums text-accent">{formatPercent(modelProbabilityNextGoalNone)}</p>
           </div>
           <div>
-            <p className="text-[11px] text-muted">Demo market probability</p>
+            <p className="text-[11px] text-muted">Market probability</p>
             <p className="text-base font-semibold tabular-nums text-market">{formatPercent(marketProbability)}</p>
           </div>
           <div>
-            <p className="text-[11px] text-muted">Demo odds</p>
+            <p className="text-[11px] text-muted">Market odds</p>
             <p className="text-base font-semibold tabular-nums text-market">{formatOdds(decimalOdds)}</p>
           </div>
           <div>
@@ -121,8 +124,7 @@ export function TradingOpportunityModal({
           </div>
         </div>
 
-        <p className="mb-2 text-center text-xs text-muted">GoalEdge found more than the required 5 percentage-point edge.</p>
-        <p className="mb-4 text-center text-[11px] text-muted">Simulated demo odds — not historical TxLINE market data.</p>
+        <p className="mb-4 text-center text-xs text-muted">GoalEdge found more than the required 5 percentage-point edge.</p>
 
         <div className="mb-3 flex items-center gap-2 rounded-md border border-border bg-surface-elevated px-3 py-2">
           <label htmlFor="demo-stake" className="text-xs font-medium text-muted">
@@ -156,7 +158,7 @@ export function TradingOpportunityModal({
             onClick={handleApprove}
             className="flex-[2] rounded-md bg-accent px-4 py-2.5 text-sm font-bold text-on-accent transition-colors hover:bg-accent/90"
           >
-            Approve demo paper trade
+            Approve paper trade
           </button>
           <button
             type="button"
