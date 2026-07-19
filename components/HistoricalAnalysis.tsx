@@ -250,21 +250,45 @@ export function HistoricalAnalysis({
   const activeSource = detail?.source ?? fixtures?.[0]?.source;
   const activeAttribution = detail?.sourceAttribution ?? fixtures?.[0]?.sourceAttribution;
   const labelling = labelForSource(activeSource, activeAttribution);
-  const usingBundledFallback = activeSource === "statsbomb_open_data_bundled";
+
+  // Bundled fixture's subtitle ("Bundled StatsBomb Open Data (2018 FIFA
+  // World Cup) -- not TxLINE, not live, not simulated.") is temporarily
+  // hidden from this UI per product request (2026-07-19) -- Panel's own
+  // subtitle prop simply renders nothing when passed undefined, which also
+  // closes the vertical space it occupied. labelForSource()'s panelSubtitle
+  // string itself is untouched above; this only suppresses it at the render
+  // site for the bundled source. The attribution/licensing text is
+  // separately preserved and unaffected -- see the comment further below.
+  // To restore, change the line below back to
+  // `subtitle={labelling.panelSubtitle}` unconditionally.
+  const visibleSubtitle = activeSource === "statsbomb_open_data_bundled" ? undefined : labelling.panelSubtitle;
 
   return (
-    <Panel title={labelling.panelTitle} subtitle={labelling.panelSubtitle} className="border-2 border-border">
+    <Panel title={labelling.panelTitle} subtitle={visibleSubtitle} className="border-2 border-border">
       <div className="mb-3 flex items-center gap-2">
         <Pill tone="neutral">{labelling.pillLabel}</Pill>
       </div>
-      {labelling.attributionNote ? (
-        <p className="mb-3 text-[11px] text-muted">
-          {usingBundledFallback
-            ? "No real downloaded TxLINE fixtures were found on this machine, so this replay uses a bundled, redistributable fixture instead. "
-            : null}
-          {labelling.attributionNote}
-        </p>
-      ) : null}
+      {/*
+        The long explanatory/licensing paragraph ("No real downloaded TxLINE
+        fixtures were found on this machine..." + labelling.attributionNote)
+        is temporarily hidden from this UI per product request (2026-07-19).
+        The underlying attribution/licensing text is NOT removed from the
+        codebase -- it still lives in labelForSource()'s attributionNote
+        (above) and ml/build_bundled_replay_fixture.py's SOURCE_ATTRIBUTION,
+        and will be placed in Terms and Conditions/documentation separately.
+
+        To restore this paragraph, reinstate:
+          const usingBundledFallback = activeSource === "statsbomb_open_data_bundled";
+        and:
+          {labelling.attributionNote ? (
+            <p className="mb-3 text-[11px] text-muted">
+              {usingBundledFallback
+                ? "No real downloaded TxLINE fixtures were found on this machine, so this replay uses a bundled, redistributable fixture instead. "
+                : null}
+              {labelling.attributionNote}
+            </p>
+          ) : null}
+      */}
 
       {fixtures === null ? (
         listError ? (
