@@ -5,6 +5,7 @@ import path from "node:path";
 import {
   deriveGoalHistory,
   reconstructFinalState,
+  reconstructSnapshots,
   reconstructTimeline,
   type RawHistoricalEntry,
 } from "./reconstructMatch.ts";
@@ -120,6 +121,61 @@ test("reconstructFinalState reports redCardsObserved=false when no Score block e
   assert.equal(state.redCardsObserved, false);
   assert.equal(state.redCardsHome, 0);
   assert.equal(state.redCardsAway, 0);
+});
+
+// --- reconstructSnapshots: honest minute checkpoints, no future events -----
+
+test("reconstructSnapshots omits a target minute the real timeline never reached, but always includes full time", () => {
+  const entries: RawHistoricalEntry[] = [
+    entry({ seq: 0, Clock: { Running: true, Seconds: 0 }, Score: score(0, 0) }),
+    entry({ seq: 1, Clock: { Running: true, Seconds: 1800 }, Score: score(1, 0) }), // minute 30
+    entry({ seq: 2, Clock: { Running: true, Seconds: 3600 }, Score: score(1, 1) }), // minute 60 -- match ends here
+  ];
+  const timeline = reconstructTimeline(entries);
+  const snapshots = reconstructSnapshots(timeline);
+
+  const labels = snapshots.map((s) => s.label);
+  assert.ok(labels.includes("15'"));
+  assert.ok(labels.includes("30'"));
+  assert.ok(labels.includes("Full time"), "the final snapshot must always be present");
+  // 60/70/75/80 were never truthfully reached before full time (minute 60) --
+  // must never be fabricated as if the match had continued.
+  assert.ok(!labels.includes("60'"));
+  assert.ok(!labels.includes("70'"));
+  assert.ok(!labels.includes("75'"));
+  assert.ok(!labels.includes("80'"));
+
+  const fullTime = snapshots.find((s) => s.label === "Full time")!;
+  assert.equal(fullTime.minute, 60);
+  assert.equal(fullTime.homeScore, 1);
+  assert.equal(fullTime.awayScore, 1);
+});
+
+test("reconstructSnapshots' goal history at an earlier checkpoint never includes a later real goal", () => {
+  const entries: RawHistoricalEntry[] = [
+    entry({ seq: 0, Clock: { Running: true, Seconds: 0 }, Score: score(0, 0) }),
+    entry({ seq: 1, Clock: { Running: true, Seconds: 900 }, Score: score(1, 0) }), // minute 15
+    entry({ seq: 2, Clock: { Running: true, Seconds: 2700 }, Score: score(1, 1) }), // minute 45
+    entry({ seq: 3, Clock: { Running: true, Seconds: 5400 }, Score: score(2, 1) }), // minute 90
+  ];
+  const timeline = reconstructTimeline(entries);
+  const snapshots = reconstructSnapshots(timeline);
+
+  const at15 = snapshots.find((s) => s.label === "15'")!;
+  assert.equal(at15.homeScore, 1);
+  assert.equal(at15.awayScore, 0);
+  assert.equal(
+    at15.goalHistory.length,
+    2,
+    "the 15' snapshot must only know about its own goal, never the later 45'/90' ones",
+  );
+
+  const fullTime = snapshots.find((s) => s.label === "Full time")!;
+  assert.equal(fullTime.goalHistory.length, 4);
+});
+
+test("reconstructSnapshots returns [] for an empty timeline", () => {
+  assert.deepEqual(reconstructSnapshots([]), []);
 });
 
 // --- Real downloaded data smoke test (skips honestly if not present) -------

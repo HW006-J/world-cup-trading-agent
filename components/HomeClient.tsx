@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Header } from "@/components/Header";
-import { SourceBanner } from "@/components/SourceBanner";
-import { MarketMonitor } from "@/components/MarketMonitor";
+import { Header, type ConnectionState } from "@/components/Header";
+import { LiveView } from "@/components/LiveView";
 import { TradeHistory } from "@/components/TradeHistory";
 import { Disclaimer } from "@/components/Disclaimer";
 import { HistoricalAnalysis } from "@/components/HistoricalAnalysis";
+import { useMarketMonitor } from "@/lib/monitoring/useMarketMonitor";
 import { loadStoredTrades, saveStoredTrades } from "@/lib/tradeStorage";
 import type { PaperTrade } from "@/lib/types";
 
@@ -15,15 +15,15 @@ const TOAST_DURATION_MS = 2500;
 type Tab = "live" | "historical" | "trades";
 
 const TABS: { id: Tab; label: string }[] = [
-  { id: "live", label: "Live Market" },
-  { id: "historical", label: "Historical Analysis" },
+  { id: "live", label: "Live" },
+  { id: "historical", label: "Historical" },
   { id: "trades", label: "Paper Trades" },
 ];
 
 // trades is never part of the initial DOM (the history tab starts hidden),
 // so reading localStorage in the useState initializer can't cause a
-// hydration mismatch — it only ever runs on the client anyway. No seeded
-// trades are mixed in here (see the old lib/seedTrades.ts, removed) --
+// hydration mismatch — it only ever runs on the client anyway. loadStoredTrades()
+// itself filters out any legacy/malformed record (see lib/tradeStorage.ts) --
 // every trade a real user sees was created from a real live TxLINE fixture.
 function getInitialTrades(): PaperTrade[] {
   return loadStoredTrades();
@@ -33,6 +33,17 @@ export function HomeClient() {
   const [activeTab, setActiveTab] = useState<Tab>("live");
   const [trades, setTrades] = useState<PaperTrade[]>(getInitialTrades);
   const [toast, setToast] = useState<string | null>(null);
+  const monitor = useMarketMonitor(trades);
+
+  // The connection badge in the header reflects the monitor's own observed
+  // state -- "connected" only once a live snapshot has genuinely been
+  // fetched, "unavailable" once a fetch has genuinely failed, and
+  // "connecting" only before either has happened yet.
+  const connection: ConnectionState = monitor.dataError
+    ? "unavailable"
+    : monitor.providerMeta
+      ? "connected"
+      : "connecting";
 
   useEffect(() => {
     if (!toast) return;
@@ -55,10 +66,10 @@ export function HomeClient() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <Header right={<SourceBanner />} />
+      <Header connection={connection} />
 
       <div className="border-b border-border bg-surface">
-        <nav className="mx-auto flex w-full max-w-6xl gap-1 px-4 py-2 sm:px-6" aria-label="Primary">
+        <nav className="mx-auto flex w-full max-w-3xl justify-center gap-1 px-4 py-2 sm:px-6" aria-label="Primary">
           {TABS.map((tab) => (
             <button
               key={tab.id}
@@ -67,7 +78,7 @@ export function HomeClient() {
               aria-current={activeTab === tab.id ? "page" : undefined}
               className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors sm:text-sm ${
                 activeTab === tab.id
-                  ? "bg-accent text-white"
+                  ? "bg-accent text-on-accent"
                   : "text-muted hover:bg-surface-elevated hover:text-foreground"
               }`}
             >
@@ -77,31 +88,18 @@ export function HomeClient() {
         </nav>
       </div>
 
-      <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
+      <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-4 py-6 sm:px-6">
         {/* Kept mounted (just hidden) rather than conditionally rendered when
             switching tabs -- unmounting would destroy useMarketMonitor's
             engine (see lib/monitoring/useMarketMonitor.ts) and silently stop
             live monitoring just because the user glanced at Paper Trades. */}
         <div className={activeTab === "live" ? "" : "hidden"}>
-          <MarketMonitor
-            trades={trades}
-            onRecordTrade={handleRecordTrade}
-            onRejectToast={handleRejectToast}
-            onViewTrades={() => setActiveTab("trades")}
-          />
+          <LiveView monitor={monitor} onRecordTrade={handleRecordTrade} onRejectToast={handleRejectToast} />
         </div>
 
-        {activeTab === "historical" ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <HistoricalAnalysis />
-          </div>
-        ) : null}
+        {activeTab === "historical" ? <HistoricalAnalysis /> : null}
 
-        {activeTab === "trades" ? (
-          <div className="mx-auto w-full max-w-3xl">
-            <TradeHistory trades={trades} />
-          </div>
-        ) : null}
+        {activeTab === "trades" ? <TradeHistory trades={trades} /> : null}
       </main>
 
       <Disclaimer />

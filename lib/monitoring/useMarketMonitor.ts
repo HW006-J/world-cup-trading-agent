@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { fetchPublicSnapshot } from "@/lib/txline/publicSnapshot";
 import type { CrossMatchScanResult } from "@/lib/scanner";
-import type { PaperTrade, ProviderMeta } from "@/lib/types";
+import type { Match, PaperTrade, ProviderMeta } from "@/lib/types";
 import { createMonitorEngine, type MonitorEngine } from "./engine";
 import { tradeFingerprint } from "./fingerprint";
-import { createGoalHistoryTracker } from "./goalHistoryTracker";
+import { createGoalHistoryTracker, type FixtureGoalHistoryState } from "./goalHistoryTracker";
 import { runLiveScan } from "./liveScan";
 import { INITIAL_MONITOR_STATE, type MonitorState } from "./reducer";
 
@@ -25,6 +25,10 @@ const DATA_ERROR_MESSAGE = "Live data is temporarily unavailable.";
 export interface UseMarketMonitorResult {
   state: MonitorState;
   liveMatchCount: number;
+  /** Every genuinely live fixture this poll, regardless of whether a nextGoal/none price is published for it -- see LiveScanResult.matches. */
+  liveMatches: Match[];
+  /** This poll's per-fixture goal-history trust state, keyed by Match.id. */
+  goalHistoryStates: ReadonlyMap<string, FixtureGoalHistoryState>;
   providerMeta: ProviderMeta | null;
   dataError: string | null;
   start: () => void;
@@ -52,6 +56,10 @@ export function useMarketMonitor(trades: PaperTrade[]): UseMarketMonitorResult {
 
   const [state, setState] = useState<MonitorState>(INITIAL_MONITOR_STATE);
   const [liveMatchCount, setLiveMatchCount] = useState(0);
+  const [liveMatches, setLiveMatches] = useState<Match[]>([]);
+  const [goalHistoryStates, setGoalHistoryStates] = useState<ReadonlyMap<string, FixtureGoalHistoryState>>(
+    () => new Map(),
+  );
   const [providerMeta, setProviderMeta] = useState<ProviderMeta | null>(null);
   const [dataError, setDataError] = useState<string | null>(null);
   const engineRef = useRef<MonitorEngine | null>(null);
@@ -70,13 +78,18 @@ export function useMarketMonitor(trades: PaperTrade[]): UseMarketMonitorResult {
 
     async function scan(): Promise<CrossMatchScanResult> {
       try {
-        const { scan: result, liveMatchCount: count, meta } = await runLiveScan(
-          fetchPublicSnapshot,
-          goalHistoryTracker,
-        );
+        const {
+          scan: result,
+          liveMatchCount: count,
+          meta,
+          matches,
+          goalHistoryStates: states,
+        } = await runLiveScan(fetchPublicSnapshot, goalHistoryTracker);
 
         lastGoodScanRef.current = result;
         setLiveMatchCount(count);
+        setLiveMatches(matches);
+        setGoalHistoryStates(states);
         setProviderMeta(meta);
         setDataError(null);
         return result;
@@ -114,5 +127,5 @@ export function useMarketMonitor(trades: PaperTrade[]): UseMarketMonitorResult {
     [],
   );
 
-  return { state, liveMatchCount, providerMeta, dataError, ...controls };
+  return { state, liveMatchCount, liveMatches, goalHistoryStates, providerMeta, dataError, ...controls };
 }
