@@ -7,6 +7,7 @@ import type {
   Match,
   Signal,
 } from "./types";
+import { EDGE_THRESHOLD_PP } from "./tradingThresholds.ts";
 
 // ---------------------------------------------------------------------------
 // Transparent demo probability model.
@@ -17,13 +18,11 @@ import type {
 // a real model later only requires replacing the functions in this file.
 // ---------------------------------------------------------------------------
 
-/**
- * Minimum edge (fair probability minus market-implied probability, in
- * percentage points) required to signal BUY. Strictly greater than -- a
- * fixture sitting at exactly this many points of edge is still PASS, never
- * BUY (see meetsBuyThreshold below, the single place this is enforced).
- */
-export const EDGE_THRESHOLD_PP = 5.0;
+// EDGE_THRESHOLD_PP itself now lives in lib/tradingThresholds.ts (the one
+// shared source of truth for both Live and Historical-demo trading), and is
+// re-exported here so every existing importer of it from "@/lib/engine"
+// keeps working unchanged.
+export { EDGE_THRESHOLD_PP };
 export const CONFIDENCE_THRESHOLD = 55;
 const DIRECTION_EPSILON = 0.02;
 

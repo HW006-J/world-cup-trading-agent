@@ -11,6 +11,7 @@ import {
   reconstructTimeline,
   type RawHistoricalEntry,
 } from "./reconstructMatch.ts";
+import { getBundledFixtureDetail, listBundledFixtures } from "./bundledProvider.ts";
 import type { HistoricalFixtureDetail, HistoricalFixtureSummary } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -99,7 +100,16 @@ function namesFor(lookup: ReadonlyMap<string, FixtureNames>, fixtureId: string):
   return { homeName: entry?.home ?? null, awayName: entry?.away ?? null };
 }
 
-/** Every genuinely downloaded historical fixture, reconstructed from real data only. Returns [] (not an error) if none have been downloaded. */
+/**
+ * Every genuinely downloaded real TxLINE historical fixture, reconstructed
+ * from real data only. If none have been downloaded (fresh clone/deploy --
+ * ml/data/raw is gitignored, see the module comment above), falls back to
+ * the committed, redistributable StatsBomb-derived bundled fixture(s) (see
+ * lib/historical/bundledProvider.ts) so the Historical tab is never
+ * silently empty. The two are never mixed in one list -- real TxLINE
+ * fixtures, when present, are always what's shown; the bundled fallback
+ * only ever appears when there are truly zero real fixtures on disk.
+ */
 export async function listHistoricalFixtures(): Promise<HistoricalFixtureSummary[]> {
   const [fixtureIds, nameLookup] = await Promise.all([listFixtureIds(), loadFixtureNameLookup()]);
   const summaries: HistoricalFixtureSummary[] = [];
@@ -125,37 +135,70 @@ export async function listHistoricalFixtures(): Promise<HistoricalFixtureSummary
       finalAwayScore: state.awayScore,
       finalMinute: state.minute,
       latestNextGoalNoneOdds,
+      source: "txline_downloaded",
     });
+  }
+
+  if (summaries.length === 0) {
+    const bundled = await listBundledFixtures();
+    return bundled
+      .map(
+        (f): HistoricalFixtureSummary => ({
+          fixtureId: f.fixtureId,
+          homeParticipantId: f.homeParticipantId,
+          awayParticipantId: f.awayParticipantId,
+          homeName: f.homeName,
+          awayName: f.awayName,
+          finalHomeScore: f.finalHomeScore,
+          finalAwayScore: f.finalAwayScore,
+          finalMinute: f.finalMinute,
+          latestNextGoalNoneOdds: null,
+          source: f.source,
+          sourceAttribution: f.sourceAttribution,
+        }),
+      )
+      .sort((a, b) => a.fixtureId.localeCompare(b.fixtureId));
   }
 
   return summaries.sort((a, b) => a.fixtureId.localeCompare(b.fixtureId));
 }
 
-/** One fixture's full reconstructed detail, or null if it doesn't genuinely exist on disk. */
+/**
+ * One fixture's full reconstructed detail. Tries the real TxLINE fixture on
+ * disk first; if it doesn't genuinely exist there, falls back to the
+ * committed bundled fixture with the same id (see listHistoricalFixtures --
+ * a caller only ever requests a bundled fixtureId when the bundled fallback
+ * was what listHistoricalFixtures itself returned). Returns null if neither
+ * genuinely has it.
+ */
 export async function getHistoricalFixtureDetail(fixtureId: string): Promise<HistoricalFixtureDetail | null> {
   const loaded = await loadFixture(fixtureId);
-  if (!loaded) return null;
-  const state = reconstructFinalState(loaded.entries);
-  if (!state) return null;
+  if (loaded) {
+    const state = reconstructFinalState(loaded.entries);
+    if (state) {
+      const [latestNextGoalNoneOdds, nameLookup] = await Promise.all([
+        findLatestNextGoalNoneOdds(path.join(RAW_DATA_DIR, fixtureId), loaded.homeParticipantId, loaded.awayParticipantId),
+        loadFixtureNameLookup(),
+      ]);
 
-  const [latestNextGoalNoneOdds, nameLookup] = await Promise.all([
-    findLatestNextGoalNoneOdds(path.join(RAW_DATA_DIR, fixtureId), loaded.homeParticipantId, loaded.awayParticipantId),
-    loadFixtureNameLookup(),
-  ]);
+      const timeline = reconstructTimeline(loaded.entries);
+      const snapshots = reconstructSnapshots(timeline);
 
-  const timeline = reconstructTimeline(loaded.entries);
-  const snapshots = reconstructSnapshots(timeline);
+      return {
+        fixtureId,
+        homeParticipantId: loaded.homeParticipantId,
+        awayParticipantId: loaded.awayParticipantId,
+        ...namesFor(nameLookup, fixtureId),
+        finalHomeScore: state.homeScore,
+        finalAwayScore: state.awayScore,
+        finalMinute: state.minute,
+        latestNextGoalNoneOdds,
+        source: "txline_downloaded",
+        state,
+        snapshots,
+      };
+    }
+  }
 
-  return {
-    fixtureId,
-    homeParticipantId: loaded.homeParticipantId,
-    awayParticipantId: loaded.awayParticipantId,
-    ...namesFor(nameLookup, fixtureId),
-    finalHomeScore: state.homeScore,
-    finalAwayScore: state.awayScore,
-    finalMinute: state.minute,
-    latestNextGoalNoneOdds,
-    state,
-    snapshots,
-  };
+  return getBundledFixtureDetail(fixtureId);
 }

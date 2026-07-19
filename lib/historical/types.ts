@@ -5,6 +5,20 @@ import type { MatchSnapshot, ReconstructedMatchState } from "./reconstructMatch.
 // these from here rather than the component type-importing the
 // server-only module directly.
 
+/**
+ * Where a historical fixture's replay data genuinely came from --
+ * "txline_downloaded" is real, proprietary TxLINE data downloaded by
+ * ml/download_replay.py into the gitignored ml/data/raw/ (never committed).
+ * "statsbomb_open_data_bundled" is a small, committed, redistributable
+ * fixture derived from the public StatsBomb Open Data 2018 World Cup event
+ * set (see ml/build_bundled_replay_fixture.py) -- used only as a fallback
+ * when zero real TxLINE fixtures are available on disk (e.g. a fresh clone
+ * or a deployment that never ran the TxLINE download script), so the
+ * Historical tab is never silently empty. The two are never conflated in
+ * the UI -- see components/HistoricalAnalysis.tsx.
+ */
+export type HistoricalDataSource = "txline_downloaded" | "statsbomb_open_data_bundled";
+
 export interface HistoricalFixtureSummary {
   fixtureId: string;
   homeParticipantId: number;
@@ -17,6 +31,9 @@ export interface HistoricalFixtureSummary {
   finalMinute: number;
   /** The most recent real nextGoal/none decimal price found anywhere in this fixture's odds history, or null if the market was never genuinely published. Never fabricated. */
   latestNextGoalNoneOdds: number | null;
+  source: HistoricalDataSource;
+  /** Only set for source === "statsbomb_open_data_bundled" -- see ml/build_bundled_replay_fixture.py's SOURCE_ATTRIBUTION. */
+  sourceAttribution?: string;
 }
 
 export interface HistoricalFixtureDetail extends HistoricalFixtureSummary {

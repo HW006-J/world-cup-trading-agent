@@ -29,8 +29,7 @@ export function Header({ connection }: { connection: ConnectionState }) {
           <span className="text-foreground">Edge</span>
         </h1>
         <p className="max-w-xl text-sm text-muted sm:text-base">
-          An AI agent that compares its prediction with live TxLINE odds and asks for approval
-          before placing a paper trade.
+          An ML agent trained on historical match data to find value in live TxLINE odds.
         </p>
         <div className="mt-1">
           <ConnectionBadge state={connection} />

@@ -8,6 +8,8 @@ import { Disclaimer } from "@/components/Disclaimer";
 import { HistoricalAnalysis } from "@/components/HistoricalAnalysis";
 import { useMarketMonitor } from "@/lib/monitoring/useMarketMonitor";
 import { loadStoredTrades, saveStoredTrades } from "@/lib/tradeStorage";
+import { loadStoredDemoTrades, saveStoredDemoTrades } from "@/lib/demoTradeStorage";
+import type { DemoPaperTrade } from "@/lib/demoTrade";
 import type { PaperTrade } from "@/lib/types";
 
 const TOAST_DURATION_MS = 2500;
@@ -29,9 +31,17 @@ function getInitialTrades(): PaperTrade[] {
   return loadStoredTrades();
 }
 
+// Same reasoning as getInitialTrades above, applied to the Historical tab's
+// separate demo-replay trade bucket (lib/demoTradeStorage.ts) -- loadStoredDemoTrades()
+// filters out anything not genuinely shaped like a buildDemoPaperTrade() record.
+function getInitialDemoTrades(): DemoPaperTrade[] {
+  return loadStoredDemoTrades();
+}
+
 export function HomeClient() {
   const [activeTab, setActiveTab] = useState<Tab>("live");
   const [trades, setTrades] = useState<PaperTrade[]>(getInitialTrades);
+  const [demoTrades, setDemoTrades] = useState<DemoPaperTrade[]>(getInitialDemoTrades);
   const [toast, setToast] = useState<string | null>(null);
   const monitor = useMarketMonitor(trades);
 
@@ -62,6 +72,15 @@ export function HomeClient() {
 
   function handleRejectToast() {
     setToast("Trade rejected");
+  }
+
+  function handleRecordDemoTrade(trade: DemoPaperTrade) {
+    setDemoTrades((prev) => {
+      if (prev.some((t) => t.id === trade.id)) return prev;
+      const next = [trade, ...prev];
+      saveStoredDemoTrades(next);
+      return next;
+    });
   }
 
   return (
@@ -97,9 +116,9 @@ export function HomeClient() {
           <LiveView monitor={monitor} onRecordTrade={handleRecordTrade} onRejectToast={handleRejectToast} />
         </div>
 
-        {activeTab === "historical" ? <HistoricalAnalysis /> : null}
+        {activeTab === "historical" ? <HistoricalAnalysis onRecordDemoTrade={handleRecordDemoTrade} /> : null}
 
-        {activeTab === "trades" ? <TradeHistory trades={trades} /> : null}
+        {activeTab === "trades" ? <TradeHistory trades={trades} demoTrades={demoTrades} /> : null}
       </main>
 
       <Disclaimer />

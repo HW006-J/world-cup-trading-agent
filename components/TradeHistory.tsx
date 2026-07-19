@@ -1,5 +1,6 @@
 import type { PaperTrade } from "@/lib/types";
-import { formatCurrency, formatMoney, formatOdds, formatTimestamp } from "@/lib/format";
+import type { DemoPaperTrade } from "@/lib/demoTrade";
+import { formatCurrency, formatMoney, formatOdds, formatPercent, formatPp, formatTimestamp } from "@/lib/format";
 import { Panel, Pill } from "./ui";
 
 const STATUS_TONE = {
@@ -18,7 +19,53 @@ function SummaryStat({ label, value, tone }: { label: string; value: string; ton
   );
 }
 
-export function TradeHistory({ trades }: { trades: PaperTrade[] }) {
+/**
+ * Historical/Demo Replay's simulated trades -- visually and structurally
+ * separate from the genuine live trades above (own storage bucket, own
+ * type, see lib/demoTrade.ts/lib/demoTradeStorage.ts). Every row carries an
+ * explicit DEMO badge and "Simulated market price" caption so it can never
+ * be mistaken for a genuine live TxLINE trade (spec: demo trades must never
+ * pass genuine live-trade validation -- see lib/tradeStorage.ts's
+ * isGenuinePaperTrade, which structurally rejects this shape).
+ */
+function DemoTradesSection({ demoTrades }: { demoTrades: DemoPaperTrade[] }) {
+  if (demoTrades.length === 0) return null;
+
+  const sorted = [...demoTrades].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
+
+  return (
+    <Panel title="Demo replay trades" subtitle="Historical replay, simulated demo odds -- never genuine live trades">
+      <ul className="flex flex-col gap-2">
+        {sorted.map((trade) => (
+          <li key={trade.id} className="rounded-lg border border-border bg-surface-elevated p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-sm font-medium text-foreground">
+                {trade.homeTeam} vs {trade.awayTeam}
+              </span>
+              <Pill tone="accent">DEMO</Pill>
+            </div>
+            <p className="mt-1 text-xs text-muted">
+              No further goal &middot; {trade.homeScore}-{trade.awayScore} at {trade.replayMinute}&apos;
+            </p>
+            <p className="mt-1 text-[11px] font-medium text-market">Simulated market price</p>
+            <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted sm:grid-cols-4">
+              <span>GoalEdge: {formatPercent(trade.modelProbability)}</span>
+              <span>Demo odds: {formatOdds(trade.demoDecimalOdds)}</span>
+              <span>Edge: {formatPp(trade.edgePp)}</span>
+              <span>
+                Stake: {formatCurrency(trade.stake)} &middot; {formatTimestamp(trade.timestamp)}
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  );
+}
+
+export function TradeHistory({ trades, demoTrades }: { trades: PaperTrade[]; demoTrades: DemoPaperTrade[] }) {
   const total = trades.length;
   const open = trades.filter((t) => t.status === "open").length;
   const settled = total - open;
@@ -29,6 +76,7 @@ export function TradeHistory({ trades }: { trades: PaperTrade[] }) {
   );
 
   return (
+    <div className="flex flex-col gap-4">
     <Panel title="Paper trade history" subtitle="Simulated positions, most recent first">
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
         <SummaryStat label="Total trades" value={String(total)} />
@@ -132,5 +180,8 @@ export function TradeHistory({ trades }: { trades: PaperTrade[] }) {
         </>
       )}
     </Panel>
+
+    <DemoTradesSection demoTrades={demoTrades} />
+    </div>
   );
 }

@@ -5,7 +5,10 @@ import path from "node:path";
 import { describeProbabilityContextNote, probabilitySourceLabel } from "./format.ts";
 import { restrictToTrainedModelActionability } from "./monitoring/liveScan.ts";
 import { analyzeSelection, isAnalysisResult, type CrossMatchScanResult } from "./scanner.ts";
-import type { Match } from "./types.ts";
+import { loadStoredTrades } from "./tradeStorage.ts";
+import { loadStoredDemoTrades } from "./demoTradeStorage.ts";
+import type { DemoPaperTrade } from "./demoTrade.ts";
+import type { Match, PaperTrade } from "./types.ts";
 
 // ---------------------------------------------------------------------------
 // Cross-cutting tests for the real-only rewrite: production-page source
@@ -148,21 +151,155 @@ test("restrictToTrainedModelActionability leaves a trained-model BUY untouched",
   assert.equal(restricted.best?.analysis.probabilitySource, "trained_model");
 });
 
-// --- 8/9. historical data without odds: model-only, no trade ---------------
+// --- 8/9. Historical has no verified real market odds. The trained model's
+// probability is real; any TRADE/PASS decision and any paper trade the
+// Historical tab can create only ever comes from a separate, clearly-
+// labelled DEMO MARKET COMPARISON pipeline (lib/demoMarket.ts,
+// lib/demoTrade.ts) -- never from the genuine live odds/edge pipeline
+// (lib/scanner.ts's analyzeSelection), the genuine live TxLINE market
+// adapter, or the genuine live paper-trade builder (lib/trade.ts's
+// buildPaperTrade). These tests prove that structurally, by inspecting
+// actual import statements, rather than banning particular wording --
+// renaming an equivalent concept must not be able to make an unsafe wiring
+// look safe. -----------------------------------------------------------
 
-test("HistoricalAnalysis never computes an edge or a BUY/PASS signal -- current historical files carry no verified nextGoal/none odds", async () => {
-  const source = await readSource("components/HistoricalAnalysis.tsx");
-  assert.ok(!source.includes("analyzeSelection"), "HistoricalAnalysis must never call analyzeSelection (the odds/edge pipeline)");
-  assert.ok(!/edgePp/.test(source), "HistoricalAnalysis must never reference an edge value");
-  assert.ok(!/["'>]BUY["'<]/.test(source), "HistoricalAnalysis must never render a BUY label");
-  assert.ok(source.includes("Historical market odds unavailable"), "the unavailable message must always render, unconditionally");
-});
+/** Every module specifier a file's `from "..."` imports name, verbatim. */
+function importedSpecifiers(source: string): string[] {
+  const specifiers: string[] = [];
+  const re = /from\s+["']([^"']+)["']/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(source))) specifiers.push(m[1]);
+  return specifiers;
+}
 
-test("HistoricalAnalysis never imports paper-trade creation -- a historical view can never open a trade", async () => {
+/** Each imported specifier's final path segment, extension stripped -- e.g. "../scanner.ts" -> "scanner", "@/lib/demoTrade" -> "demoTrade". */
+function importedModuleBaseNames(source: string): string[] {
+  return importedSpecifiers(source).map((s) => s.replace(/\.ts$/, "").split("/").pop() ?? "");
+}
+
+test("HistoricalAnalysis never imports the genuine live odds/edge pipeline, the genuine paper-trade builder/storage, or the live TxLINE market adapter", async () => {
   const source = await readSource("components/HistoricalAnalysis.tsx");
-  assert.ok(!source.includes("buildPaperTrade"));
+  const baseNames = importedModuleBaseNames(source);
+  const rawSpecifiers = importedSpecifiers(source);
+  assert.ok(!baseNames.includes("scanner"), "must never import lib/scanner.ts (analyzeSelection, the genuine odds/edge pipeline)");
+  assert.ok(!baseNames.includes("liveScan"), "must never import the genuine live scan engine");
+  assert.ok(!baseNames.includes("trade"), "must never import lib/trade.ts's genuine buildPaperTrade");
+  assert.ok(!baseNames.includes("tradeStorage"), "must never import the genuine live trade storage bucket");
+  assert.ok(!rawSpecifiers.some((s) => s.includes("/txline/")), "must never import the genuine live TxLINE market adapter");
+  assert.ok(source.includes("Historical market odds unavailable"), "the real-odds-unavailable disclosure must always render, unconditionally");
   assert.ok(!source.includes("RecommendationModal"));
   assert.ok(!source.includes("PaperTradeForm"));
+});
+
+test("lib/demoMarket.ts and lib/demoTrade.ts (the Historical tab's simulated pipeline) never import the genuine live scanner, live scan engine, TxLINE market adapter, or genuine trade builder/storage", async () => {
+  for (const file of ["lib/demoMarket.ts", "lib/demoTrade.ts"]) {
+    const source = await readSource(file);
+    const baseNames = importedModuleBaseNames(source);
+    const rawSpecifiers = importedSpecifiers(source);
+    assert.ok(!baseNames.includes("scanner"), `${file} must never import lib/scanner.ts`);
+    assert.ok(!baseNames.includes("liveScan"), `${file} must never import the genuine live scan engine`);
+    assert.ok(!baseNames.includes("trade"), `${file} must never import lib/trade.ts`);
+    assert.ok(!baseNames.includes("tradeStorage"), `${file} must never import lib/tradeStorage.ts`);
+    assert.ok(!rawSpecifiers.some((s) => s.includes("/txline/")), `${file} must never import the genuine live TxLINE market adapter`);
+  }
+});
+
+test("the genuine live pipeline never imports the Historical tab's demo-replay code -- demo odds can never enter it", async () => {
+  for (const file of [
+    "lib/scanner.ts",
+    "lib/monitoring/liveScan.ts",
+    "lib/txline/client.ts",
+    "lib/txline/provider.ts",
+    "lib/txline/publicSnapshot.ts",
+    "lib/trade.ts",
+    "lib/tradeStorage.ts",
+    "components/LiveView.tsx",
+  ]) {
+    const source = await readSource(file);
+    const baseNames = importedModuleBaseNames(source);
+    assert.ok(!baseNames.includes("demoMarket"), `${file} must never import lib/demoMarket.ts`);
+    assert.ok(!baseNames.includes("demoTrade"), `${file} must never import lib/demoTrade.ts`);
+    assert.ok(!baseNames.includes("demoTradeStorage"), `${file} must never import lib/demoTradeStorage.ts`);
+  }
+});
+
+test("genuine live-trade storage rejects a demo-replay-shaped record, and demo-trade storage rejects a genuine live-trade-shaped record -- the two provenances can never cross", () => {
+  const genuineTrade: PaperTrade = {
+    id: "trade-1",
+    timestamp: new Date(0).toISOString(),
+    matchId: "txline-123",
+    matchLabel: "Home FC vs Away FC",
+    marketId: "nextGoal",
+    marketLabel: "Next Team to Score",
+    selectionId: "none",
+    selectionLabel: "No further goals",
+    odds: 2.5,
+    stake: 10,
+    potentialReturn: 25,
+    signal: "BUY",
+    status: "open",
+    pnl: null,
+    provenance: {
+      fixtureId: "txline-123",
+      provider: "txline_live",
+      marketOddsAsOf: new Date(0).toISOString(),
+      probabilitySource: "trained_model",
+    },
+  };
+
+  const genuineDemoTrade: DemoPaperTrade = {
+    id: "demo-trade-1",
+    fixtureId: "statsbomb_2018_8658",
+    homeTeam: "France",
+    awayTeam: "Croatia",
+    replayMinute: 75,
+    homeScore: 4,
+    awayScore: 2,
+    marketId: "nextGoal",
+    selectionId: "none",
+    modelProbability: 0.6,
+    demoDecimalOdds: 1.85,
+    marketImpliedProbability: 0.54,
+    edgePp: 6,
+    stake: 10,
+    timestamp: new Date(0).toISOString(),
+    mode: "demo_replay",
+    provider: "historical_txline",
+    marketPriceSource: "simulated_demo",
+  };
+
+  const originalWindow = (globalThis as { window?: unknown }).window;
+  const store = new Map<string, string>();
+  (globalThis as { window?: unknown }).window = {
+    localStorage: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value);
+      },
+    },
+  };
+  try {
+    store.set("pitchedge.paperTrades.v1", JSON.stringify([genuineDemoTrade]));
+    assert.deepEqual(loadStoredTrades(), [], "a DemoPaperTrade-shaped record must never pass genuine live-trade validation");
+
+    store.set("pitchedge.demoPaperTrades.v1", JSON.stringify([genuineTrade]));
+    assert.deepEqual(loadStoredDemoTrades(), [], "a genuine PaperTrade-shaped record must never pass demo-trade validation");
+
+    // Sanity: each storage genuinely accepts its own real shape -- proves the
+    // rejections above are real discrimination, not both storages being broken.
+    store.set("pitchedge.paperTrades.v1", JSON.stringify([genuineTrade]));
+    assert.deepEqual(loadStoredTrades(), [genuineTrade]);
+    store.set("pitchedge.demoPaperTrades.v1", JSON.stringify([genuineDemoTrade]));
+    assert.deepEqual(loadStoredDemoTrades(), [genuineDemoTrade]);
+  } finally {
+    (globalThis as { window?: unknown }).window = originalWindow;
+  }
+});
+
+test("the demo market comparison always discloses simulated odds, and never labels them as TxLINE data", async () => {
+  const source = await readSource("components/DemoMarketComparison.tsx");
+  assert.ok(source.includes("Simulated demo odds — not historical TxLINE market data."));
+  assert.ok(!/TxLINE market odds|TxLINE decimal odds|TxLINE odds/.test(source), "demo odds must never be labelled as TxLINE odds");
 });
 
 test("HistoricalAnalysis is clearly labelled and never claims to be live or simulated", async () => {

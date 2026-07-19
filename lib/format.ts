@@ -24,6 +24,44 @@ export function formatOdds(odds: number): string {
   return odds.toFixed(2);
 }
 
+// ---------------------------------------------------------------------------
+// Presentation-only formatters for the trained model's raw feature values
+// (see lib/model/reasoning.ts) -- every one of these only rounds/relabels a
+// number for display. They never feed back into model inference (which
+// always runs on the unrounded value from lib/model/nextGoalNoneModel.ts).
+// ---------------------------------------------------------------------------
+
+/** Nearest whole match minute, with the app's existing apostrophe convention (see e.g. LiveView.tsx's `${match.minute}'`). */
+export function formatMinute(minute: number): string {
+  return `${Math.round(minute)}'`;
+}
+
+/** minute_squared, comma-grouped with exactly 2 decimal places -- e.g. 10346.280277777778 -> "10,346.28". */
+export function formatMinuteSquared(value: number): string {
+  return value.toLocaleString("en-GB", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+/** Whole-number display for a count that's already integral (scores, total goals, red cards) -- guards against a stray float rendering with decimals. */
+export function formatCount(value: number): string {
+  return String(Math.round(value));
+}
+
+/** Signed whole number -- e.g. goal difference: +1, 0, -1 (0 carries no sign). */
+export function formatSignedInt(value: number): string {
+  const rounded = Math.round(value);
+  return rounded > 0 ? `+${rounded}` : String(rounded);
+}
+
+/** 0/1 model flag rendered as a human answer rather than a bare digit. */
+export function formatYesNo(flag: number): string {
+  return flag === 1 ? "Yes" : "No";
+}
+
+/** Duration in minutes, one decimal place plus unit -- e.g. 10.25 -> "10.3 minutes". */
+export function formatDurationMinutes(value: number): string {
+  return `${value.toFixed(1)} minutes`;
+}
+
 /**
  * Human label for AnalysisResult.probabilitySource. Deliberately makes no
  * claim of accuracy or profitability either way -- see AnalysisResult in
