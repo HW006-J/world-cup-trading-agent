@@ -107,6 +107,15 @@ export function useMarketMonitor(trades: PaperTrade[]): UseMarketMonitorResult {
     });
     engineRef.current = engine;
     const unsubscribe = engine.subscribe(setState);
+    // Started here, not left to a child component's own mount effect (e.g.
+    // LiveView's): React fires child passive effects before parent ones, so
+    // a child-owned `monitor.start()` call would run before this effect had
+    // set engineRef.current, making it a silent no-op (optional chaining)
+    // and leaving monitoring permanently un-started -- no fetch ever fires,
+    // and the header badge sits on "Connecting to TxLINE…" forever. Starting
+    // unconditionally in the same effect that creates the engine guarantees
+    // the ref is already populated.
+    engine.start();
     return () => {
       unsubscribe();
       engine.destroy();
