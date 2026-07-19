@@ -9,6 +9,8 @@ import { HistoricalAnalysis } from "@/components/HistoricalAnalysis";
 import { useMarketMonitor } from "@/lib/monitoring/useMarketMonitor";
 import { loadStoredTrades, saveStoredTrades } from "@/lib/tradeStorage";
 import { loadStoredDemoTrades, saveStoredDemoTrades } from "@/lib/demoTradeStorage";
+import { formatTimestamp } from "@/lib/format";
+import { EDGE_THRESHOLD_PP } from "@/lib/tradingThresholds";
 import type { DemoPaperTrade } from "@/lib/demoTrade";
 import type { PaperTrade } from "@/lib/types";
 
@@ -38,11 +40,23 @@ function getInitialDemoTrades(): DemoPaperTrade[] {
   return loadStoredDemoTrades();
 }
 
+/** Plain-text mirror of Header's ConnectionBadge wording, for the compact status strip below it. */
+function statusStripConnectionLabel(connection: ConnectionState): string {
+  if (connection === "connected") return "TxLINE connected";
+  if (connection === "unavailable") return "TxLINE unavailable";
+  return "Connecting to TxLINE…";
+}
+
 export function HomeClient() {
   const [activeTab, setActiveTab] = useState<Tab>("live");
   const [trades, setTrades] = useState<PaperTrade[]>(getInitialTrades);
   const [demoTrades, setDemoTrades] = useState<DemoPaperTrade[]>(getInitialDemoTrades);
   const [toast, setToast] = useState<string | null>(null);
+  // Bumped only by Live's "Run historical replay" CTA -- HistoricalAnalysis
+  // is only ever mounted while its tab is active (see below), so a fresh,
+  // non-zero value on the very next mount is exactly what tells it to
+  // launch the hero replay instead of an ordinary tab visit.
+  const [historicalLaunchToken, setHistoricalLaunchToken] = useState(0);
   const monitor = useMarketMonitor(trades);
 
   // The connection badge in the header reflects the monitor's own observed
@@ -74,6 +88,11 @@ export function HomeClient() {
     setToast("Trade rejected");
   }
 
+  function handleRunHistoricalReplay() {
+    setActiveTab("historical");
+    setHistoricalLaunchToken((t) => t + 1);
+  }
+
   function handleRecordDemoTrade(trade: DemoPaperTrade) {
     setDemoTrades((prev) => {
       if (prev.some((t) => t.id === trade.id)) return prev;
@@ -86,6 +105,13 @@ export function HomeClient() {
   return (
     <div className="flex min-h-screen flex-col bg-background">
       <Header connection={connection} />
+
+      <div className="border-b border-border bg-surface-elevated">
+        <p className="mx-auto max-w-3xl px-4 py-1.5 text-center text-[11px] text-muted sm:px-6">
+          {statusStripConnectionLabel(connection)} &middot; Scans every 5s &middot; Trained ML model &middot; &gt;{EDGE_THRESHOLD_PP}pp edge required
+          {activeTab === "live" && monitor.providerMeta ? <> &middot; Updated {formatTimestamp(monitor.providerMeta.asOf)}</> : null}
+        </p>
+      </div>
 
       <div className="border-b border-border bg-surface">
         <nav className="mx-auto flex w-full max-w-3xl justify-center gap-1 px-4 py-2 sm:px-6" aria-label="Primary">
@@ -113,10 +139,17 @@ export function HomeClient() {
             engine (see lib/monitoring/useMarketMonitor.ts) and silently stop
             live monitoring just because the user glanced at Paper Trades. */}
         <div className={activeTab === "live" ? "" : "hidden"}>
-          <LiveView monitor={monitor} onRecordTrade={handleRecordTrade} onRejectToast={handleRejectToast} />
+          <LiveView
+            monitor={monitor}
+            onRecordTrade={handleRecordTrade}
+            onRejectToast={handleRejectToast}
+            onRunHistoricalReplay={handleRunHistoricalReplay}
+          />
         </div>
 
-        {activeTab === "historical" ? <HistoricalAnalysis onRecordDemoTrade={handleRecordDemoTrade} /> : null}
+        {activeTab === "historical" ? (
+          <HistoricalAnalysis onRecordDemoTrade={handleRecordDemoTrade} launchToken={historicalLaunchToken} />
+        ) : null}
 
         {activeTab === "trades" ? <TradeHistory trades={trades} demoTrades={demoTrades} /> : null}
       </main>

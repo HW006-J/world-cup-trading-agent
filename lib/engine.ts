@@ -59,6 +59,29 @@ export function confidenceLabelFor(confidence: number): ConfidenceLabel {
   return confidence >= 70 ? "High" : confidence >= 40 ? "Medium" : "Low";
 }
 
+/** Same 3-way (home/away/none) baseline lib/scanner.ts's trained-model path uses for the nextGoal market. */
+export const NEXT_GOAL_BASELINE_EVEN = 1 / 3;
+
+/**
+ * Single source of truth for turning a fair probability into a 10-95
+ * confidence score, reused by both lib/scanner.ts's trained-model path
+ * (genuine live nextGoal/none) and lib/demoMarket.ts's replay scenario
+ * (Historical tab) -- never a second, driftable copy of this formula.
+ * Depends only on match.minute/match.status and how decisive fairProbability
+ * is relative to baselineEven -- never on a real market price, so it's
+ * equally honest to compute for a replay scenario that has no genuine odds.
+ */
+export function confidenceForModelProbability(
+  match: Pick<Match, "minute" | "status">,
+  fairProbability: number,
+  baselineEven: number,
+): number {
+  const dataMaturity = match.status === "upcoming" ? 0.1 : clamp(match.minute / 90, 0, 1);
+  const decisiveness = Math.min(Math.abs(fairProbability - baselineEven) * 2, 1);
+  const confidenceRaw = 45 + 35 * dataMaturity + 20 * decisiveness;
+  return Math.round(clamp(confidenceRaw, 10, 95));
+}
+
 function minutesRemaining(match: Match): number {
   if (match.status === "upcoming") return 90;
   if (match.status === "finished") return 0;

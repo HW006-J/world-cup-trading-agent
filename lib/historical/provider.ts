@@ -12,6 +12,7 @@ import {
   type RawHistoricalEntry,
 } from "./reconstructMatch.ts";
 import { getBundledFixtureDetail, listBundledFixtures } from "./bundledProvider.ts";
+import { AUTHORED_DEMO_FIXTURE } from "./authoredDemoScenario.ts";
 import type { HistoricalFixtureDetail, HistoricalFixtureSummary } from "./types.ts";
 
 // ---------------------------------------------------------------------------
@@ -100,15 +101,38 @@ function namesFor(lookup: ReadonlyMap<string, FixtureNames>, fixtureId: string):
   return { homeName: entry?.home ?? null, awayName: entry?.away ?? null };
 }
 
+/** The one hand-scripted, deterministic fixture (see lib/historical/authoredDemoScenario.ts), reduced to summary shape. */
+function authoredDemoFixtureSummary(): HistoricalFixtureSummary {
+  const f = AUTHORED_DEMO_FIXTURE;
+  return {
+    fixtureId: f.fixtureId,
+    homeParticipantId: f.homeParticipantId,
+    awayParticipantId: f.awayParticipantId,
+    homeName: f.homeName,
+    awayName: f.awayName,
+    finalHomeScore: f.finalHomeScore,
+    finalAwayScore: f.finalAwayScore,
+    finalMinute: f.finalMinute,
+    latestNextGoalNoneOdds: f.latestNextGoalNoneOdds,
+    source: f.source,
+    sourceAttribution: f.sourceAttribution,
+  };
+}
+
 /**
  * Every genuinely downloaded real TxLINE historical fixture, reconstructed
  * from real data only. If none have been downloaded (fresh clone/deploy --
  * ml/data/raw is gitignored, see the module comment above), falls back to
  * the committed, redistributable StatsBomb-derived bundled fixture(s) (see
  * lib/historical/bundledProvider.ts) so the Historical tab is never
- * silently empty. The two are never mixed in one list -- real TxLINE
- * fixtures, when present, are always what's shown; the bundled fallback
- * only ever appears when there are truly zero real fixtures on disk.
+ * silently empty. Real TxLINE fixtures and the bundled fallback are never
+ * mixed together -- real fixtures, when present, are always what's shown
+ * alongside them; the bundled fallback only ever appears when there are
+ * truly zero real fixtures on disk. The one hand-scripted, deterministic
+ * authored demo scenario (see lib/historical/authoredDemoScenario.ts) is
+ * always appended in addition to whichever of the two is in use -- a
+ * purpose-built fixture for predictable submission-video pacing, never a
+ * replacement for real or bundled data.
  */
 export async function listHistoricalFixtures(): Promise<HistoricalFixtureSummary[]> {
   const [fixtureIds, nameLookup] = await Promise.all([listFixtureIds(), loadFixtureNameLookup()]);
@@ -139,9 +163,10 @@ export async function listHistoricalFixtures(): Promise<HistoricalFixtureSummary
     });
   }
 
+  let baseSummaries: HistoricalFixtureSummary[];
   if (summaries.length === 0) {
     const bundled = await listBundledFixtures();
-    return bundled
+    baseSummaries = bundled
       .map(
         (f): HistoricalFixtureSummary => ({
           fixtureId: f.fixtureId,
@@ -158,9 +183,11 @@ export async function listHistoricalFixtures(): Promise<HistoricalFixtureSummary
         }),
       )
       .sort((a, b) => a.fixtureId.localeCompare(b.fixtureId));
+  } else {
+    baseSummaries = summaries.sort((a, b) => a.fixtureId.localeCompare(b.fixtureId));
   }
 
-  return summaries.sort((a, b) => a.fixtureId.localeCompare(b.fixtureId));
+  return [...baseSummaries, authoredDemoFixtureSummary()];
 }
 
 /**
@@ -172,6 +199,8 @@ export async function listHistoricalFixtures(): Promise<HistoricalFixtureSummary
  * genuinely has it.
  */
 export async function getHistoricalFixtureDetail(fixtureId: string): Promise<HistoricalFixtureDetail | null> {
+  if (fixtureId === AUTHORED_DEMO_FIXTURE.fixtureId) return AUTHORED_DEMO_FIXTURE;
+
   const loaded = await loadFixture(fixtureId);
   if (loaded) {
     const state = reconstructFinalState(loaded.entries);

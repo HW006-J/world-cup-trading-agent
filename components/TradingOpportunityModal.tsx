@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { formatOdds, formatPercent, formatPp } from "@/lib/format";
+import { formatCurrency, formatOdds, formatPercent, formatPp } from "@/lib/format";
 import { BuildDemoPaperTradeError, buildDemoPaperTrade, type DemoPaperTrade } from "@/lib/demoTrade";
 import type { FeatureContribution } from "@/lib/model/nextGoalNoneModel";
 import { buildComparisonSentence } from "@/lib/model/reasoning";
@@ -57,6 +57,7 @@ export function TradingOpportunityModal({
 
   const stakeValue = Number(stakeInput);
   const stakeIsValid = Number.isFinite(stakeValue) && stakeValue > 0;
+  const potentialReturn = stakeIsValid ? stakeValue * decimalOdds : 0;
 
   function handleApprove() {
     if (!stakeInput.trim() || !stakeIsValid) {
@@ -144,6 +145,11 @@ export function TradingOpportunityModal({
             }}
             className="w-full bg-transparent py-1 text-base font-semibold tabular-nums text-foreground outline-none"
           />
+        </div>
+
+        <div className="mb-3 flex items-center justify-between rounded-md border border-border bg-surface-elevated px-3 py-2">
+          <span className="text-xs font-medium text-muted">Potential return</span>
+          <span className="text-base font-semibold tabular-nums text-buy">{formatCurrency(potentialReturn)}</span>
         </div>
 
         {error ? (

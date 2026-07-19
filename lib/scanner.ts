@@ -1,4 +1,11 @@
-import { clamp, computeAnalysis, confidenceLabelFor, meetsBuyThreshold, minutesFraction } from "./engine.ts";
+import {
+  clamp,
+  computeAnalysis,
+  confidenceForModelProbability,
+  confidenceLabelFor,
+  meetsBuyThreshold,
+  NEXT_GOAL_BASELINE_EVEN,
+} from "./engine.ts";
 import { deriveLiveFeatures, type GoalHistoryPoint } from "./model/liveFeatureAdapter.ts";
 import {
   explainInference,
@@ -43,8 +50,8 @@ const MODEL_FAIR_PROBABILITY_CLAMP_MIN = 0.01;
 const MODEL_FAIR_PROBABILITY_CLAMP_MAX = 0.98;
 /** Below this, a feature's contribution to the logit is treated as roughly neutral rather than a meaningful push either way. */
 const FACTOR_DIRECTION_EPSILON = 0.02;
-/** Same baseline lib/engine.ts uses for the nextGoal market (3-way: home / away / none). */
-const NEXT_GOAL_BASELINE_EVEN = 1 / 3;
+// NEXT_GOAL_BASELINE_EVEN itself now lives in lib/engine.ts (the shared
+// confidence formula's own home), imported above.
 
 const NEXT_GOAL_NONE_FEATURE_LABELS: Record<ModelFeatureName, string> = {
   minute: "Match minute",
@@ -101,11 +108,7 @@ function buildTrainedModelAnalysis(
   const impliedProbability = 1 / decimalOdds;
   const edgePp = (fairProbability - impliedProbability) * 100;
 
-  const t = minutesFraction(match);
-  const dataMaturity = match.status === "upcoming" ? 0.1 : t;
-  const decisiveness = Math.min(Math.abs(fairProbability - NEXT_GOAL_BASELINE_EVEN) * 2, 1);
-  const confidenceRaw = 45 + 35 * dataMaturity + 20 * decisiveness;
-  const confidence = Math.round(clamp(confidenceRaw, 10, 95));
+  const confidence = confidenceForModelProbability(match, fairProbability, NEXT_GOAL_BASELINE_EVEN);
   const confidenceLabel = confidenceLabelFor(confidence);
   // Mirrors lib/engine.ts's own finished-match guard -- a finished match can
   // never be traded, regardless of edge/confidence or probability source.

@@ -14,10 +14,14 @@ import type { MatchSnapshot, ReconstructedMatchState } from "./reconstructMatch.
  * set (see ml/build_bundled_replay_fixture.py) -- used only as a fallback
  * when zero real TxLINE fixtures are available on disk (e.g. a fresh clone
  * or a deployment that never ran the TxLINE download script), so the
- * Historical tab is never silently empty. The two are never conflated in
+ * Historical tab is never silently empty. "authored_demo_scenario" is the
+ * one hand-scripted, deterministic, minute-by-minute fixture (see
+ * lib/historical/authoredDemoScenario.ts) built for predictable submission-
+ * video pacing -- always available alongside whichever of the other two is
+ * in use, never a replacement for them. The three are never conflated in
  * the UI -- see components/HistoricalAnalysis.tsx.
  */
-export type HistoricalDataSource = "txline_downloaded" | "statsbomb_open_data_bundled";
+export type HistoricalDataSource = "txline_downloaded" | "statsbomb_open_data_bundled" | "authored_demo_scenario";
 
 export interface HistoricalFixtureSummary {
   fixtureId: string;

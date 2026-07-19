@@ -244,7 +244,16 @@ const DECISION_STYLES: Record<DecisionState, { label: string; className: string 
   STALE: { label: "Data stale", className: "border-negative/40 bg-negative-soft text-negative" },
 };
 
-function DecisionCard({ state, sentence }: { state: DecisionState; sentence: string }) {
+function DecisionCard({
+  state,
+  sentence,
+  onRunHistoricalReplay,
+}: {
+  state: DecisionState;
+  sentence: string;
+  /** Offered only alongside the WAITING state -- see LiveView's own onRunHistoricalReplay prop. */
+  onRunHistoricalReplay?: () => void;
+}) {
   const style = DECISION_STYLES[state];
   return (
     <Panel>
@@ -253,6 +262,15 @@ function DecisionCard({ state, sentence }: { state: DecisionState; sentence: str
           {style.label}
         </span>
         <p className="max-w-xl text-sm text-foreground">{sentence}</p>
+        {state === "WAITING" && onRunHistoricalReplay ? (
+          <button
+            type="button"
+            onClick={onRunHistoricalReplay}
+            className="mt-2 rounded-md bg-accent px-5 py-2.5 text-sm font-bold text-on-accent transition-colors hover:bg-accent/90"
+          >
+            Run historical replay
+          </button>
+        ) : null}
       </div>
     </Panel>
   );
@@ -456,10 +474,13 @@ export function LiveView({
   monitor,
   onRecordTrade,
   onRejectToast,
+  onRunHistoricalReplay,
 }: {
   monitor: UseMarketMonitorResult;
   onRecordTrade: (trade: PaperTrade) => void;
   onRejectToast: () => void;
+  /** Switches to Historical and launches the hero replay (see HomeClient.tsx / HistoricalAnalysis.tsx) -- only ever offered while there's genuinely no live match to show instead. */
+  onRunHistoricalReplay: () => void;
 }) {
   const { state, liveMatches, goalHistoryStates, providerMeta } = monitor;
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
@@ -591,7 +612,7 @@ export function LiveView({
         providerMetaAsOf={providerMeta?.asOf ?? null}
       />
 
-      <DecisionCard state={decision} sentence={sentence} />
+      <DecisionCard state={decision} sentence={sentence} onRunHistoricalReplay={onRunHistoricalReplay} />
 
       {selectedMatch ? (
         <ModelInputsCard

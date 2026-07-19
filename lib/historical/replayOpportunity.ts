@@ -1,4 +1,7 @@
 import { buildPassExampleScenario, buildTradeExampleScenario, type DemoScenario } from "../demoMarket.ts";
+import { CONFIDENCE_THRESHOLD } from "../engine.ts";
+import { EDGE_THRESHOLD_PP } from "../tradingThresholds.ts";
+import type { Match } from "../types.ts";
 
 // ---------------------------------------------------------------------------
 // Pure orchestration logic for the Historical tab's automatic "a trading
@@ -44,12 +47,18 @@ export function hasReachedOpportunity(snapshotLabels: readonly string[], current
  * TRADE-caliber gap at/after it -- always derived from the current genuine
  * model probability passed in (never hard-coded), reusing
  * lib/demoMarket.ts's buildPassExampleScenario/buildTradeExampleScenario
- * verbatim rather than a second copy of that math.
+ * verbatim rather than a second copy of that math. `match` (minute/status)
+ * feeds the same confidence formula and edge+confidence qualification rule
+ * genuine Live trading uses -- see lib/demoMarket.ts.
  */
-export function scenarioForSnapshot(modelProbabilityNextGoalNone: number, reachedOpportunity: boolean): DemoScenario {
+export function scenarioForSnapshot(
+  modelProbabilityNextGoalNone: number,
+  reachedOpportunity: boolean,
+  match: Pick<Match, "minute" | "status">,
+): DemoScenario {
   return reachedOpportunity
-    ? buildTradeExampleScenario(modelProbabilityNextGoalNone)
-    : buildPassExampleScenario(modelProbabilityNextGoalNone);
+    ? buildTradeExampleScenario(modelProbabilityNextGoalNone, match)
+    : buildPassExampleScenario(modelProbabilityNextGoalNone, match);
 }
 
 /**
@@ -66,4 +75,40 @@ export function shouldTriggerOpportunityModal(params: {
   hasTriggeredOpportunity: boolean;
 }): boolean {
   return !params.hasTriggeredOpportunity && params.arrivedViaAutoplay && isOpportunityCheckpoint(params.snapshotLabel);
+}
+
+/**
+ * Two-sentence explanation of the current demo TRADE/PASS decision, mirroring
+ * lib/narrative.ts's buildVerdictNarrative() reasoning ladder (same edge/
+ * confidence thresholds, imported not duplicated) but in TRADE/PASS wording
+ * rather than BUY/PASS, and naming the "simulated market" explicitly rather
+ * than implying a genuine one -- so Historical replay reuses the existing
+ * rationale system's logic without ever claiming a real market price or
+ * rendering the live-only "BUY" label.
+ */
+export function buildDemoVerdictNarrative(
+  modelProbabilityNextGoalNone: number,
+  scenario: DemoScenario,
+): { headline: string; detail: string } {
+  const marketPct = (scenario.marketProbability * 100).toFixed(1);
+  const modelPct = (modelProbabilityNextGoalNone * 100).toFixed(1);
+  const edgeAbs = Math.abs(scenario.edgePp).toFixed(1);
+
+  const headline =
+    scenario.edgePp >= 0
+      ? `The simulated market prices no further goal at ${marketPct}%, while GoalEdge estimates ${modelPct}%. That creates a ${edgeAbs} percentage-point edge.`
+      : `The simulated market prices no further goal at ${marketPct}%, while GoalEdge estimates only ${modelPct}%. The model sees ${edgeAbs} percentage points less value than the simulated market.`;
+
+  let detail: string;
+  if (scenario.decision === "TRADE") {
+    detail = `That clears GoalEdge's ${EDGE_THRESHOLD_PP}pp edge threshold with ${scenario.confidenceLabel.toLowerCase()} confidence (${scenario.confidence}/100), so the agent signals TRADE.`;
+  } else if (scenario.edgePp >= EDGE_THRESHOLD_PP && scenario.confidence < CONFIDENCE_THRESHOLD) {
+    detail = `The model detects some value, but confidence (${scenario.confidence}/100) is below the ${CONFIDENCE_THRESHOLD} trading threshold, so the agent signals PASS.`;
+  } else if (scenario.edgePp > 0 && scenario.edgePp < EDGE_THRESHOLD_PP) {
+    detail = `The edge is real but too small to trade on (below the ${EDGE_THRESHOLD_PP}pp threshold), so the agent signals PASS.`;
+  } else {
+    detail = `GoalEdge doesn't see enough value here relative to the simulated market, so the agent signals PASS.`;
+  }
+
+  return { headline, detail };
 }

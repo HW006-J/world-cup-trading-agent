@@ -1,18 +1,27 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Panel, Pill, Stat } from "./ui";
 import { DemoMarketComparison } from "./DemoMarketComparison";
 import { ReasoningSummary } from "./ModelReasoning";
 import { TradingOpportunityModal } from "./TradingOpportunityModal";
+import { ProbabilityHistoryChart, type GoalMarker, type ProbabilityHistoryPoint } from "./ProbabilityHistoryChart";
 import { formatOdds, formatPercent } from "@/lib/format";
+import type { DemoDecision } from "@/lib/demoMarket";
 import type { DemoPaperTrade } from "@/lib/demoTrade";
-import { deriveLiveFeatures } from "@/lib/model/liveFeatureAdapter";
+import { deriveLiveFeatures, type GoalHistoryPoint } from "@/lib/model/liveFeatureAdapter";
 import { explainInference, NEXT_GOAL_NONE_MODEL, type NextGoalNoneModelInput } from "@/lib/model/nextGoalNoneModel";
 import { buildComparisonSentence } from "@/lib/model/reasoning";
-import { hasReachedOpportunity, scenarioForSnapshot, shouldTriggerOpportunityModal } from "@/lib/historical/replayOpportunity";
+import {
+  buildDemoVerdictNarrative,
+  hasReachedOpportunity,
+  scenarioForSnapshot,
+  shouldTriggerOpportunityModal,
+} from "@/lib/historical/replayOpportunity";
+import { visibleThrough } from "@/lib/historical/progressiveReveal";
+import { resolveHeroFixtureId } from "@/lib/historical/heroFixture";
 import type { Match } from "@/lib/types";
-import type { HistoricalFixtureDetail, HistoricalFixtureSummary } from "@/lib/historical/types";
+import type { HistoricalDataSource, HistoricalFixtureDetail, HistoricalFixtureSummary } from "@/lib/historical/types";
 import type { MatchSnapshot } from "@/lib/historical/reconstructMatch";
 
 // ---------------------------------------------------------------------------
@@ -77,13 +86,93 @@ async function fetchJson<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function HistoricalAnalysis({ onRecordDemoTrade }: { onRecordDemoTrade: (trade: DemoPaperTrade) => void }) {
+/**
+ * The one place Historical labelling branches on which of the three
+ * possible data sources (see lib/historical/types.ts's HistoricalDataSource)
+ * is actually active -- never claims real TxLINE data for the bundled or
+ * authored sources, and never claims a real match for the authored one.
+ */
+function labelForSource(
+  source: HistoricalDataSource | undefined,
+  sourceAttribution: string | undefined,
+): { pillLabel: string; panelTitle: string; panelSubtitle: string; attributionNote: string | null } {
+  if (source === "authored_demo_scenario") {
+    return {
+      pillLabel: "Authored demo scenario",
+      panelTitle: "Historical replay data (authored demo scenario)",
+      panelSubtitle: "Hand-scripted, minute-by-minute demo -- not TxLINE, not live, not a real match.",
+      attributionNote: sourceAttribution ?? null,
+    };
+  }
+  if (source === "statsbomb_open_data_bundled") {
+    return {
+      pillLabel: "Bundled replay data",
+      panelTitle: "Historical replay data (bundled fixture)",
+      panelSubtitle: "Bundled StatsBomb Open Data (2018 FIFA World Cup) -- not TxLINE, not live, not simulated.",
+      attributionNote: sourceAttribution ?? null,
+    };
+  }
+  return {
+    pillLabel: "Historical TxLINE data",
+    panelTitle: "Historical TxLINE match data",
+    panelSubtitle: "Real downloaded TxLINE fixtures -- not live, not simulated",
+    attributionNote: null,
+  };
+}
+
+/** Every real goal (never the synthetic minute-0 kickoff baseline every goalHistory array starts with) -- which team, and at which minute. */
+function buildGoalMarkers(goalHistory: readonly GoalHistoryPoint[]): GoalMarker[] {
+  const markers: GoalMarker[] = [];
+  for (let i = 1; i < goalHistory.length; i++) {
+    const prev = goalHistory[i - 1];
+    const curr = goalHistory[i];
+    if (curr.homeScore > prev.homeScore) markers.push({ minute: curr.minute, team: "home" });
+    else if (curr.awayScore > prev.awayScore) markers.push({ minute: curr.minute, team: "away" });
+  }
+  return markers;
+}
+
+export function HistoricalAnalysis({
+  onRecordDemoTrade,
+  launchToken = 0,
+}: {
+  onRecordDemoTrade: (trade: DemoPaperTrade) => void;
+  /**
+   * >0 means this mount was triggered by the Live tab's "Run historical
+   * replay" CTA (see components/LiveView.tsx / HomeClient.tsx) -- select the
+   * designated hero fixture, jump to its first snapshot, and autoplay once.
+   * 0 (the default) is an ordinary tab visit. HistoricalAnalysis is only
+   * ever mounted while the Historical tab is active (see HomeClient.tsx),
+   * so this value is fixed for this component instance's whole lifetime.
+   */
+  launchToken?: number;
+}) {
+  const heroLaunchRequested = launchToken > 0;
   const [fixtures, setFixtures] = useState<HistoricalFixtureSummary[] | null>(null);
   const [listError, setListError] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [detail, setDetail] = useState<HistoricalFixtureDetail | null>(null);
   const [detailError, setDetailError] = useState(false);
   const [selectedMinute, setSelectedMinute] = useState<number | null>(null);
+  // Which fixture id the hero launch actually resolved to (see
+  // lib/historical/heroFixture.ts -- the primary real fixture if present,
+  // otherwise the bundled fallback) and whether that launch is still armed
+  // (disarmed the moment its detail first loads -- see the effect below --
+  // so a later manual re-visit to the same fixture never re-triggers autoplay).
+  const [heroTargetFixtureId, setHeroTargetFixtureId] = useState<string | null>(null);
+  const [heroArmed, setHeroArmed] = useState(false);
+  // Mirrors of the two state values above, kept in sync via the effect right
+  // below, so the detail-fetch effect further down can read their current
+  // value without depending on them -- depending on heroArmed there would
+  // make that effect's own `setHeroArmed(false)` disarm call retrigger
+  // itself, refetching and overwriting the just-set first-snapshot minute
+  // with the ordinary last-snapshot one.
+  const heroArmedRef = useRef(heroArmed);
+  const heroTargetFixtureIdRef = useRef(heroTargetFixtureId);
+  useEffect(() => {
+    heroArmedRef.current = heroArmed;
+    heroTargetFixtureIdRef.current = heroTargetFixtureId;
+  }, [heroArmed, heroTargetFixtureId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,7 +180,16 @@ export function HistoricalAnalysis({ onRecordDemoTrade }: { onRecordDemoTrade: (
       .then(({ fixtures: list }) => {
         if (cancelled) return;
         setFixtures(list);
-        if (list.length > 0) setSelectedId(list[0].fixtureId);
+        if (heroLaunchRequested) {
+          const heroId = resolveHeroFixtureId(list.map((f) => f.fixtureId));
+          if (heroId) {
+            setHeroTargetFixtureId(heroId);
+            setHeroArmed(true);
+            setSelectedId(heroId);
+          }
+        } else if (list.length > 0) {
+          setSelectedId(list[0].fixtureId);
+        }
       })
       .catch(() => {
         if (!cancelled) setListError(true);
@@ -99,6 +197,7 @@ export function HistoricalAnalysis({ onRecordDemoTrade }: { onRecordDemoTrade: (
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- heroLaunchRequested is fixed for this mount's lifetime
   }, []);
 
   useEffect(() => {
@@ -112,7 +211,20 @@ export function HistoricalAnalysis({ onRecordDemoTrade }: { onRecordDemoTrade: (
       .then((d) => {
         if (cancelled) return;
         setDetail(d);
-        setSelectedMinute(d.snapshots.length > 0 ? d.snapshots[d.snapshots.length - 1].minute : null);
+        const useFirstSnapshot = heroArmedRef.current && d.fixtureId === heroTargetFixtureIdRef.current;
+        setSelectedMinute(
+          d.snapshots.length > 0 ? d.snapshots[useFirstSnapshot ? 0 : d.snapshots.length - 1].minute : null,
+        );
+        // Disarm immediately once its target fixture's detail has loaded --
+        // the child (HistoricalFixtureView) already captured "should
+        // autoplay" synchronously during the render this triggers (see
+        // initialAutoPlay's lazy useState initializer below), so disarming
+        // here doesn't affect that already-captured value; it only prevents
+        // a later, unrelated remount (e.g. manually navigating away and
+        // back to the same fixture) from being treated as a fresh launch.
+        // Reading/writing via the ref (not the state var) keeps this effect
+        // scoped to only [selectedId], so this disarm can never retrigger it.
+        if (heroArmedRef.current) setHeroArmed(false);
       })
       .catch(() => {
         if (!cancelled) setDetailError(true);
@@ -122,29 +234,27 @@ export function HistoricalAnalysis({ onRecordDemoTrade }: { onRecordDemoTrade: (
     };
   }, [selectedId]);
 
-  // The provider only ever falls back to bundled StatsBomb demo data when
-  // zero real TxLINE fixtures exist on disk (see lib/historical/provider.ts)
-  // -- so every fixture in the list shares the same source, and checking
-  // the first is enough to decide which labelling to show.
-  const usingBundledFallback = !!fixtures && fixtures.length > 0 && fixtures[0].source === "statsbomb_open_data_bundled";
+  // Labelling always reflects the ACTUALLY selected/loaded fixture's own
+  // source once one has loaded (a user can manually pick the authored demo
+  // scenario even when real TxLINE fixtures are also available), falling
+  // back to the fixture list's own default (fixtures[0]) only before any
+  // detail has loaded yet.
+  const activeSource = detail?.source ?? fixtures?.[0]?.source;
+  const activeAttribution = detail?.sourceAttribution ?? fixtures?.[0]?.sourceAttribution;
+  const labelling = labelForSource(activeSource, activeAttribution);
+  const usingBundledFallback = activeSource === "statsbomb_open_data_bundled";
 
   return (
-    <Panel
-      title={usingBundledFallback ? "Historical replay data (bundled fixture)" : "Historical TxLINE match data"}
-      subtitle={
-        usingBundledFallback
-          ? "Bundled StatsBomb Open Data (2018 FIFA World Cup) -- not TxLINE, not live, not simulated."
-          : "Real downloaded TxLINE fixtures -- not live, not simulated"
-      }
-      className="border-2 border-border"
-    >
+    <Panel title={labelling.panelTitle} subtitle={labelling.panelSubtitle} className="border-2 border-border">
       <div className="mb-3 flex items-center gap-2">
-        <Pill tone="neutral">{usingBundledFallback ? "Bundled replay data" : "Historical TxLINE data"}</Pill>
+        <Pill tone="neutral">{labelling.pillLabel}</Pill>
       </div>
-      {usingBundledFallback ? (
+      {labelling.attributionNote ? (
         <p className="mb-3 text-[11px] text-muted">
-          No real downloaded TxLINE fixtures were found on this machine, so this replay uses a bundled,
-          redistributable fixture instead. {fixtures[0].sourceAttribution}
+          {usingBundledFallback
+            ? "No real downloaded TxLINE fixtures were found on this machine, so this replay uses a bundled, redistributable fixture instead. "
+            : null}
+          {labelling.attributionNote}
         </p>
       ) : null}
 
@@ -194,6 +304,7 @@ export function HistoricalAnalysis({ onRecordDemoTrade }: { onRecordDemoTrade: (
               selectedMinute={selectedMinute}
               onSelectMinute={setSelectedMinute}
               onRecordDemoTrade={onRecordDemoTrade}
+              initialAutoPlay={heroArmed && detail.fixtureId === heroTargetFixtureId}
             />
           )}
         </>
@@ -202,16 +313,16 @@ export function HistoricalAnalysis({ onRecordDemoTrade }: { onRecordDemoTrade: (
   );
 }
 
-/** One replay snapshot's real, model-derived "no further goal" probability. Snapshots whose trained-model inputs aren't genuinely available are simply omitted (see buildTimelinePoints), never filled with a guessed value. */
-interface TimelinePoint {
-  label: string;
-  minute: number;
-  probabilityNoneFurther: number;
-}
-
-/** Every snapshot run through the trained model once (never a second, driftable copy of explainInference), skipping any snapshot whose inputs are genuinely unavailable rather than guessing a value for it. */
-function buildTimelinePoints(detail: HistoricalFixtureDetail): TimelinePoint[] {
-  const points: TimelinePoint[] = [];
+/**
+ * Every snapshot run through the trained model once (never a second,
+ * driftable copy of explainInference), skipping any snapshot whose inputs
+ * are genuinely unavailable rather than guessing a value for it. This is
+ * the COMPLETE history -- callers must filter it through
+ * lib/historical/progressiveReveal.ts's visibleThrough() before it ever
+ * reaches the chart; see HistoricalFixtureView below, the only caller.
+ */
+function buildTimelinePoints(detail: HistoricalFixtureDetail): ProbabilityHistoryPoint[] {
+  const points: ProbabilityHistoryPoint[] = [];
   for (const s of detail.snapshots) {
     const match = buildSnapshotMatch(detail, s);
     const liveFeatures = deriveLiveFeatures(match, s.goalHistory);
@@ -222,97 +333,26 @@ function buildTimelinePoints(detail: HistoricalFixtureDetail): TimelinePoint[] {
   return points;
 }
 
-/**
- * Small inline line chart of the trained model's "no further goal"
- * probability across every real replay snapshot -- single series, so no
- * legend box (the title names what's plotted); the currently-selected
- * snapshot gets the one direct label, every other point stays unlabelled
- * (an sr-only list carries the full series for non-visual access).
- */
-function ProbabilityTimeline({
-  points,
-  selectedLabel,
-  onSelect,
-}: {
-  points: TimelinePoint[];
-  selectedLabel: string;
-  onSelect: (minute: number) => void;
-}) {
-  if (points.length < 2) return null;
-
-  const width = 320;
-  const height = 90;
-  const padX = 14;
-  const padY = 16;
-  const innerW = width - padX * 2;
-  const innerH = height - padY * 2;
-
-  const xFor = (i: number) => padX + (innerW * i) / (points.length - 1);
-  const yFor = (p: number) => padY + innerH * (1 - p);
-  const midY = yFor(0.5);
-
-  const linePath = points
-    .map((pt, i) => `${i === 0 ? "M" : "L"} ${xFor(i).toFixed(1)} ${yFor(pt.probabilityNoneFurther).toFixed(1)}`)
-    .join(" ");
-
-  return (
-    <div>
-      <p className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">
-        No further goal probability over time
-      </p>
-      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" role="img" aria-hidden="true">
-        <line x1={padX} y1={midY} x2={width - padX} y2={midY} className="stroke-border" strokeWidth={1} />
-        <path d={linePath} fill="none" className="stroke-accent" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-        {points.map((pt, i) => {
-          const isSelected = pt.label === selectedLabel;
-          return (
-            <g key={pt.label} onClick={() => onSelect(pt.minute)} className="cursor-pointer">
-              <circle
-                cx={xFor(i)}
-                cy={yFor(pt.probabilityNoneFurther)}
-                r={isSelected ? 6 : 4}
-                className="fill-accent stroke-surface"
-                strokeWidth={2}
-              />
-              <title>{`${pt.label}: ${formatPercent(pt.probabilityNoneFurther, 0)} probability of no further goal`}</title>
-              {isSelected ? (
-                <text
-                  x={xFor(i)}
-                  y={yFor(pt.probabilityNoneFurther) - 10}
-                  textAnchor="middle"
-                  className="fill-foreground text-[9px] font-semibold"
-                >
-                  {formatPercent(pt.probabilityNoneFurther, 0)}
-                </text>
-              ) : null}
-            </g>
-          );
-        })}
-      </svg>
-      <p className="sr-only">
-        {points
-          .map((p) => `${p.label}: ${formatPercent(p.probabilityNoneFurther, 0)} probability of no further goal.`)
-          .join(" ")}
-      </p>
-    </div>
-  );
-}
-
 /** How long a transient confirmation ("Opportunity rejected.", "Paper trade recorded...") stays visible -- same duration HomeClient's own toast uses. */
 const NOTICE_DURATION_MS = 2500;
+/** How long the goal-event banner and recommendation-transition callout stay visible -- long enough to read, short enough to keep the pacing tight for a submission-video recording. */
+const EVENT_HIGHLIGHT_DURATION_MS = 4000;
 
 function HistoricalFixtureView({
   detail,
   selectedMinute,
   onSelectMinute,
   onRecordDemoTrade,
+  initialAutoPlay,
 }: {
   detail: HistoricalFixtureDetail;
   selectedMinute: number | null;
   onSelectMinute: (minute: number) => void;
   onRecordDemoTrade: (trade: DemoPaperTrade) => void;
+  /** Consumed exactly once, at mount, via the lazy useState initializer below -- true only when this exact mount was produced by the hero-launch flow (see HistoricalAnalysis's heroArmed/heroTargetFixtureId). */
+  initialAutoPlay?: boolean;
 }) {
-  const [isPlaying, setIsPlaying] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(() => initialAutoPlay ?? false);
   // Set at most once per replay run and never reset except by Restart or
   // selecting a different fixture (which remounts this whole component via
   // its `key={detail.fixtureId}` in HistoricalAnalysis) -- so the automatic
@@ -361,6 +401,14 @@ function HistoricalFixtureView({
   const match = buildSnapshotMatch(detail, snapshot);
   const liveFeatures = deriveLiveFeatures(match, snapshot.goalHistory);
   const timelinePoints = buildTimelinePoints(detail);
+  const goalMarkers = buildGoalMarkers(detail.state.goalHistory);
+  // The chart (and the goal-event banner below) must only ever see what's
+  // available at the currently displayed minute -- never the complete
+  // authored/reconstructed history, even though that's what's held
+  // internally for simulation (see lib/historical/progressiveReveal.ts).
+  const visiblePoints = visibleThrough(timelinePoints, snapshot.minute);
+  const visibleGoalMarkers = visibleThrough(goalMarkers, snapshot.minute);
+  const goalAtThisMinute = goalMarkers.find((g) => g.minute === snapshot.minute) ?? null;
   const reachedOpportunity = hasReachedOpportunity(
     detail.snapshots.map((s) => s.label),
     currentIndex,
@@ -436,7 +484,9 @@ function HistoricalFixtureView({
         <p className="text-xs font-semibold tracking-wide text-muted uppercase">
           {snapshot.label} &middot; {Math.round(snapshot.minute)}&apos;
         </p>
-        <p className="text-3xl font-extrabold tabular-nums text-foreground">
+        <p
+          className={`text-3xl font-extrabold tabular-nums text-foreground ${goalAtThisMinute ? "animate-pulse text-buy" : ""}`}
+        >
           {snapshot.homeScore}&ndash;{snapshot.awayScore}
         </p>
         <p className="text-xs text-muted">
@@ -450,7 +500,7 @@ function HistoricalFixtureView({
         ) : null}
       </div>
 
-      <ProbabilityTimeline points={timelinePoints} selectedLabel={snapshot.label} onSelect={selectManually} />
+      <ProbabilityHistoryChart points={visiblePoints} goals={visibleGoalMarkers} onSelect={selectManually} />
 
       {!liveFeatures.available ? (
         <p className="text-sm text-muted">
@@ -466,7 +516,9 @@ function HistoricalFixtureView({
           homeScore={snapshot.homeScore}
           awayScore={snapshot.awayScore}
           minute={snapshot.minute}
+          status={match.status}
           reachedOpportunity={reachedOpportunity}
+          justScored={goalAtThisMinute}
           modalOpen={modalOpen}
           notice={notice}
           onApproveDemoTrade={handleApproveDemoTrade}
@@ -485,6 +537,11 @@ function HistoricalFixtureView({
  * simply recomputed from the current genuine model probability on every
  * render, never hard-coded and never frozen in local state.
  */
+/** "PASS -> TRADE"/"TRADE -> PASS" framed for judges, e.g. Opportunity detected / No trade -- see section 6's example framing (never the Live-only BUY/Watching wording). */
+function describeRecommendationTransition(to: DemoDecision): string {
+  return to === "TRADE" ? "PASS → Opportunity detected" : "TRADE → No trade";
+}
+
 function ModelOnlyAnalysis({
   liveFeaturesInput,
   fixtureId,
@@ -493,7 +550,9 @@ function ModelOnlyAnalysis({
   homeScore,
   awayScore,
   minute,
+  status,
   reachedOpportunity,
+  justScored,
   modalOpen,
   notice,
   onApproveDemoTrade,
@@ -507,8 +566,11 @@ function ModelOnlyAnalysis({
   homeScore: number;
   awayScore: number;
   minute: number;
+  status: Match["status"];
   /** True at/after the automatic opportunity checkpoint (see lib/historical/replayOpportunity.ts) -- decides which demo scenario gap (small PASS vs large TRADE) to show. */
   reachedOpportunity: boolean;
+  /** Non-null only at the exact minute a goal is revealed -- see HistoricalFixtureView's buildGoalMarkers. */
+  justScored: GoalMarker | null;
   modalOpen: boolean;
   notice: string | null;
   onApproveDemoTrade: (trade: DemoPaperTrade) => void;
@@ -534,10 +596,41 @@ function ModelOnlyAnalysis({
   // Never hard-coded: scenarioForSnapshot only ever derives the simulated
   // market probability/odds/edge from modelPct, the trained model's own
   // current output at this snapshot -- recomputed fresh every render.
-  const scenario = scenarioForSnapshot(modelPct, reachedOpportunity);
+  const scenario = scenarioForSnapshot(modelPct, reachedOpportunity, { minute, status });
+
+  // Detects a genuine TRADE<->PASS transition (never forced -- purely a
+  // consequence of the real scenario/qualification math above) and briefly
+  // explains why, reusing buildDemoVerdictNarrative's reasoning ladder.
+  const previousDecisionRef = useRef<DemoDecision | null>(null);
+  const [transitionMessage, setTransitionMessage] = useState<string | null>(null);
+  useEffect(() => {
+    const previous = previousDecisionRef.current;
+    previousDecisionRef.current = scenario.decision;
+    if (previous === null || previous === scenario.decision) return;
+    setTransitionMessage(describeRecommendationTransition(scenario.decision));
+    const timer = setTimeout(() => setTransitionMessage(null), EVENT_HIGHLIGHT_DURATION_MS);
+    return () => clearTimeout(timer);
+  }, [scenario.decision]);
+
+  const highlightRecentEvent = !!justScored || !!transitionMessage;
 
   return (
     <div className="flex flex-col gap-3">
+      {justScored ? (
+        <div className="rounded-md border border-buy/40 bg-buy-soft px-3 py-2 text-center">
+          <p className="animate-pulse text-sm font-bold text-buy">
+            &#9917; GOAL &mdash; {justScored.team === "home" ? homeTeam : awayTeam} scores! {homeScore}-{awayScore}
+          </p>
+        </div>
+      ) : null}
+
+      {transitionMessage ? (
+        <div className="rounded-md border border-accent/40 bg-accent/10 px-3 py-2 text-center">
+          <p className="text-xs font-bold tracking-wide text-accent uppercase">{transitionMessage}</p>
+          <p className="mt-0.5 text-[11px] text-muted">{buildDemoVerdictNarrative(modelPct, scenario).detail}</p>
+        </div>
+      ) : null}
+
       <div className="grid grid-cols-3 gap-2">
         <Stat label="No further goal" value={formatPercent(modelPct)} hint="Trained model probability" />
         <Stat
@@ -548,7 +641,9 @@ function ModelOnlyAnalysis({
         <Stat label="GoalEdge fair odds" value={fairOdds} hint="1 / model probability" />
       </div>
 
-      <DemoMarketComparison modelProbabilityNextGoalNone={modelPct} scenario={scenario} />
+      <div className={highlightRecentEvent ? "animate-pulse rounded-lg ring-2 ring-buy/60" : ""}>
+        <DemoMarketComparison modelProbabilityNextGoalNone={modelPct} scenario={scenario} />
+      </div>
 
       {notice ? (
         <p role="status" className="text-xs font-medium text-accent">
